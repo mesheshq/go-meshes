@@ -44,6 +44,6 @@ Wire an event to an integration connection:
 
 ```bash
 cd create-rule
-go run .                                                              # list connections & rules
-go run . 550e8400-e29b-41d4-a716-446655440000 user.signup add_contact # create a rule
+go run .                                                        # list connections & rules
+go run . f8aa1827-... 550e8400-... contact.created send_webhook # create a rule
 ```

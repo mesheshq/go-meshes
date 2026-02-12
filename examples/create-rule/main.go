@@ -5,12 +5,12 @@
 // Usage:
 //
 //	cp ../.env.example ../.env   # fill in your credentials
-//	go run .                                              # interactive — lists connections, then creates rule
-//	go run . <connection_id> <event_name> <action>        # direct
+//	go run .                                                                      # lists workspaces, connections, and rules
+//	go run . <workspace_id> <connection_id> <event_name> <action>                 # create a rule
 //
 // Example:
 //
-//	go run . 550e8400-e29b-41d4-a716-446655440000 user.signup add_contact
+//	go run . f8aa1827-... 550e8400-... contact.created send_webhook
 package main
 
 import (
@@ -47,22 +47,49 @@ func main() {
 
 	ctx := context.Background()
 
-	// Direct mode: go run . <connection_id> <event> <action>
-	if len(os.Args) == 4 {
-		connID, err := uuid.Parse(os.Args[1])
+	// Direct mode: go run . <workspace_id> <connection_id> <event> <action>
+	if len(os.Args) == 5 {
+		wsID, err := uuid.Parse(os.Args[1])
+		if err != nil {
+			log.Fatalf("Invalid workspace ID: %v", err)
+		}
+		connID, err := uuid.Parse(os.Args[2])
 		if err != nil {
 			log.Fatalf("Invalid connection ID: %v", err)
 		}
-		createRule(ctx, client, connID, os.Args[2], os.Args[3])
+		createRule(ctx, client, wsID, connID, os.Args[3], os.Args[4])
 		return
 	}
 
-	// Interactive mode: show connections, then list existing rules
+	// Interactive mode: show workspaces, connections, and existing rules
 	showConnectionsAndRules(ctx, client)
 }
 
 func showConnectionsAndRules(ctx context.Context, client *meshes.ClientWithResponses) {
-	// Step 1: List connections
+	// Step 1: List workspaces
+	fmt.Println("Fetching workspaces...")
+	wsResp, err := client.GetWorkspacesWithResponse(ctx)
+	if err != nil {
+		log.Fatalf("Request failed: %v", err)
+	}
+
+	switch {
+	case wsResp.JSON200 != nil:
+		if wsResp.JSON200.Count == 0 {
+			fmt.Println("No workspaces found. Create one first.")
+			return
+		}
+		fmt.Printf("Found %d workspace(s):\n\n", wsResp.JSON200.Count)
+		for _, ws := range wsResp.JSON200.Records {
+			fmt.Printf("  %-36s  %s\n", ws.Id, ws.Name)
+		}
+		fmt.Println()
+	default:
+		fmt.Printf("Unexpected status %d: %s\n", wsResp.StatusCode(), string(wsResp.Body))
+		return
+	}
+
+	// Step 2: List connections
 	fmt.Println("Fetching connections...")
 	connResp, err := client.GetConnectionsWithResponse(ctx)
 	if err != nil {
@@ -71,14 +98,12 @@ func showConnectionsAndRules(ctx context.Context, client *meshes.ClientWithRespo
 
 	switch {
 	case connResp.JSON200 != nil:
-		connections := connResp.JSON200.Records
 		if connResp.JSON200.Count == 0 {
 			fmt.Println("No connections found. Create a connection in the Meshes dashboard first.")
 			return
 		}
-
 		fmt.Printf("Found %d connection(s):\n\n", connResp.JSON200.Count)
-		for _, conn := range connections {
+		for _, conn := range connResp.JSON200.Records {
 			fmt.Printf("  %-36s  %-12s  %s\n", conn.Id, conn.Type, conn.Name)
 		}
 		fmt.Println()
@@ -87,7 +112,7 @@ func showConnectionsAndRules(ctx context.Context, client *meshes.ClientWithRespo
 		return
 	}
 
-	// Step 2: List existing rules
+	// Step 3: List existing rules
 	fmt.Println("Fetching rules...")
 	rulesResp, err := client.GetRulesWithResponse(ctx, &meshes.GetRulesParams{})
 	if err != nil {
@@ -99,10 +124,10 @@ func showConnectionsAndRules(ctx context.Context, client *meshes.ClientWithRespo
 		rules := rulesResp.JSON200.Records
 		if rulesResp.JSON200.Count == 0 {
 			fmt.Println("No rules yet. Create one with:")
-			fmt.Println("  go run . <connection_id> <event_name> <action>")
+			fmt.Println("  go run . <workspace_id> <connection_id> <event_name> <action>")
 			fmt.Println()
 			fmt.Println("Example:")
-			fmt.Println("  go run . 550e8400-e29b-41d4-a716-446655440000 user.signup add_contact")
+			fmt.Println("  go run . f8aa1827-... 550e8400-... user.signup add_contact")
 			return
 		}
 
@@ -120,10 +145,11 @@ func showConnectionsAndRules(ctx context.Context, client *meshes.ClientWithRespo
 	}
 }
 
-func createRule(ctx context.Context, client *meshes.ClientWithResponses, connectionID uuid.UUID, event string, action string) {
-	fmt.Printf("Creating rule: %s → %s (connection %s)...\n", event, action, connectionID)
+func createRule(ctx context.Context, client *meshes.ClientWithResponses, workspaceID uuid.UUID, connectionID uuid.UUID, event string, action string) {
+	fmt.Printf("Creating rule: %s → %s (workspace %s, connection %s)...\n", event, action, workspaceID, connectionID)
 
 	resp, err := client.CreateRuleWithResponse(ctx, meshes.CreateRuleJSONRequestBody{
+		Workspace:  workspaceID,
 		Connection: connectionID,
 		Event:      event,
 		Metadata: meshes.RuleMetadata{
