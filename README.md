@@ -25,10 +25,7 @@ import (
 )
 
 func main() {
-    client, err := meshes.NewEventClient(
-        "https://api.meshes.io",
-        "your-publishable-key",
-    )
+    client, err := meshes.NewEventClient("your-publishable-key")
     if err != nil {
         log.Fatal(err)
     }
@@ -56,51 +53,56 @@ func main() {
 func ptr[T any](v T) *T { return &v }
 ```
 
-### Management API (Bearer JWT Auth)
+### Management API (Machine Key Auth)
+
+The management client automatically mints short-lived HS256 JWTs (30s expiry) for each request using your machine key credentials. No manual token management needed.
 
 ```go
-client, err := meshes.NewManagementClient(
-    "https://api.meshes.io",
-    "your-jwt-token",
+import (
+    "os"
+    meshes "github.com/mesheshq/go-meshes"
 )
+
+client, err := meshes.NewManagementClient(meshes.MeshesCredentials{
+    AccessKey: os.Getenv("MESHES_ACCESS_KEY"),
+    SecretKey: os.Getenv("MESHES_SECRET_KEY"),
+    OrgID:     os.Getenv("MESHES_ORG_ID"),
+})
 if err != nil {
     log.Fatal(err)
 }
 
 // List workspaces
 workspaces, err := client.GetWorkspacesWithResponse(context.Background())
-if err != nil {
-    log.Fatal(err)
-}
 for _, ws := range workspaces.JSON200.Records {
     fmt.Printf("Workspace: %s (%s)\n", ws.Name, ws.Id)
 }
 
-// List connections for a workspace
-connections, err := client.GetWorkspaceConnectionsWithResponse(
-    context.Background(),
-    workspaceID,
-)
+// List connections, get rules, manage mappings, etc.
+connections, _ := client.GetWorkspaceConnectionsWithResponse(ctx, workspaceID)
 
-// Get rules filtered by event
 event := "user.signup"
-rules, err := client.GetRulesWithResponse(context.Background(), &meshes.GetRulesParams{
-    Event: &event,
-})
+rules, _ := client.GetRulesWithResponse(ctx, &meshes.GetRulesParams{Event: &event})
 
-// Get and update field mappings
-mappings, err := client.GetConnectionDefaultMappingsWithResponse(
-    context.Background(),
-    connectionID,
-)
+mappings, _ := client.GetConnectionDefaultMappingsWithResponse(ctx, connectionID)
 ```
 
 ## Authentication
 
-| Method | Use Case | Helper |
-|--------|----------|--------|
-| Bearer JWT | Management APIs (workspaces, connections, rules, mappings) | `NewManagementClient()` |
-| Publishable Key | Event ingestion (CreateEvent, CreateBulkEvent) | `NewEventClient()` |
+| Method | Use Case | Constructor |
+|--------|----------|-------------|
+| Machine Key (HS256 JWT) | Management APIs (workspaces, connections, rules, mappings) | `NewManagementClient(creds)` |
+| Publishable Key | Event ingestion (CreateEvent, CreateBulkEvent) | `NewEventClient(key)` |
+
+The management client handles JWT generation automatically — each request gets a fresh token signed with your secret key. Tokens expire in 30 seconds. See [Authentication docs](https://meshes.io/docs/api/authentication) for details.
+
+## Configuration
+
+The SDK defaults to `https://api.meshes.io`. To override (e.g. for local development):
+
+```go
+client, err := meshes.NewManagementClient(creds, meshes.WithServerURL("http://localhost:3000"))
+```
 
 ## Response Handling
 
@@ -109,8 +111,7 @@ All `*WithResponse` methods return typed response structs with fields for each p
 ```go
 resp, err := client.GetWorkspaceWithResponse(ctx, workspaceID)
 if err != nil {
-    // Network or transport error
-    log.Fatal(err)
+    log.Fatal(err) // network or transport error
 }
 
 switch {

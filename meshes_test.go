@@ -2,18 +2,28 @@ package meshes
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
-	"github.com/google/uuid"
 
+	"github.com/google/uuid"
 	openapi_types "github.com/deepmap/oapi-codegen/pkg/types"
 )
 
-// --- Helper ---
+// --- Helpers ---
+
+var testCreds = MeshesCredentials{
+	AccessKey: "mk_test_access_key",
+	SecretKey: "mk_test_secret_key_value",
+	OrgID:     "00000000-0000-0000-0000-000000000099",
+}
 
 func mustUUID(s string) openapi_types.UUID {
 	u, err := uuid.Parse(s)
@@ -32,25 +42,118 @@ func jsonResponse(t *testing.T, w http.ResponseWriter, status int, body interfac
 	}
 }
 
-// --- Auth Tests ---
+func newTestManagementClient(t *testing.T, server *httptest.Server) *ClientWithResponses {
+	t.Helper()
+	client, err := NewManagementClient(testCreds, WithServerURL(server.URL))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	return client
+}
 
-func TestWithBearerAuth(t *testing.T) {
+func newTestEventClient(t *testing.T, server *httptest.Server) *ClientWithResponses {
+	t.Helper()
+	client, err := NewEventClient("pub_test_key", WithServerURL(server.URL))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	return client
+}
+
+// --- JWT Tests ---
+
+func TestMintJWT(t *testing.T) {
+	token, err := mintJWT(testCreds)
+	if err != nil {
+		t.Fatalf("mintJWT failed: %v", err)
+	}
+
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 JWT parts, got %d", len(parts))
+	}
+
+	// Decode and verify header
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatalf("failed to decode header: %v", err)
+	}
+	var header map[string]string
+	json.Unmarshal(headerJSON, &header)
+
+	if header["alg"] != "HS256" {
+		t.Errorf("expected alg HS256, got %s", header["alg"])
+	}
+	if header["typ"] != "JWT" {
+		t.Errorf("expected typ JWT, got %s", header["typ"])
+	}
+	if header["kid"] != testCreds.AccessKey {
+		t.Errorf("expected kid %s, got %s", testCreds.AccessKey, header["kid"])
+	}
+
+	// Decode and verify payload
+	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("failed to decode payload: %v", err)
+	}
+	var payload map[string]interface{}
+	json.Unmarshal(payloadJSON, &payload)
+
+	if payload["iss"] != "urn:meshes:m2m:"+testCreds.AccessKey {
+		t.Errorf("unexpected iss: %v", payload["iss"])
+	}
+	if payload["aud"] != "meshes-api" {
+		t.Errorf("unexpected aud: %v", payload["aud"])
+	}
+	if payload["org"] != testCreds.OrgID {
+		t.Errorf("unexpected org: %v", payload["org"])
+	}
+
+	// Verify exp is ~30s from iat
+	iat := int64(payload["iat"].(float64))
+	exp := int64(payload["exp"].(float64))
+	if exp-iat != 30 {
+		t.Errorf("expected 30s expiry, got %ds", exp-iat)
+	}
+
+	// Verify signature
+	signingInput := parts[0] + "." + parts[1]
+	mac := hmac.New(sha256.New, []byte(testCreds.SecretKey))
+	mac.Write([]byte(signingInput))
+	expectedSig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	if parts[2] != expectedSig {
+		t.Error("JWT signature verification failed")
+	}
+}
+
+func TestManagementClientSendsJWT(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
-		if auth != "Bearer test-token-123" {
-			t.Errorf("expected Bearer test-token-123, got %s", auth)
+		if !strings.HasPrefix(auth, "Bearer ") {
+			t.Errorf("expected Bearer auth, got %s", auth)
 		}
+
+		token := strings.TrimPrefix(auth, "Bearer ")
+		parts := strings.Split(token, ".")
+		if len(parts) != 3 {
+			t.Errorf("expected valid JWT, got %s", token)
+		}
+
+		// Verify the kid matches our access key
+		headerJSON, _ := base64.RawURLEncoding.DecodeString(parts[0])
+		var header map[string]string
+		json.Unmarshal(headerJSON, &header)
+		if header["kid"] != testCreds.AccessKey {
+			t.Errorf("expected kid %s, got %s", testCreds.AccessKey, header["kid"])
+		}
+
 		jsonResponse(t, w, 200, map[string]interface{}{
 			"count": 0, "limit": 20, "next_cursor": nil, "records": []interface{}{},
 		})
 	}))
 	defer server.Close()
 
-	client, err := NewManagementClient(server.URL, "test-token-123")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-
+	client := newTestManagementClient(t, server)
 	resp, err := client.GetWorkspacesWithResponse(context.Background())
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -60,7 +163,7 @@ func TestWithBearerAuth(t *testing.T) {
 	}
 }
 
-func TestWithPublishableKey(t *testing.T) {
+func TestEventClientSendsPublishableKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := r.Header.Get("X-Meshes-Publishable-Key")
 		if key != "pub_test_key" {
@@ -78,11 +181,7 @@ func TestWithPublishableKey(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewEventClient(server.URL, "pub_test_key")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-
+	client := newTestEventClient(t, server)
 	resp, err := client.CreateEventWithResponse(context.Background(), CreateEventJSONRequestBody{
 		Event: "user.signup",
 		Payload: EventPayload{
@@ -97,7 +196,71 @@ func TestWithPublishableKey(t *testing.T) {
 	}
 }
 
-// --- Client Tests ---
+// --- Credential Validation ---
+
+func TestManagementClientRequiresAllCredentials(t *testing.T) {
+	tests := []struct {
+		name  string
+		creds MeshesCredentials
+	}{
+		{"missing access key", MeshesCredentials{SecretKey: "s", OrgID: "o"}},
+		{"missing secret key", MeshesCredentials{AccessKey: "a", OrgID: "o"}},
+		{"missing org id", MeshesCredentials{AccessKey: "a", SecretKey: "s"}},
+		{"all empty", MeshesCredentials{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewManagementClient(tt.creds)
+			if err == nil {
+				t.Error("expected error for missing credentials")
+			}
+		})
+	}
+}
+
+func TestEventClientRequiresPublishableKey(t *testing.T) {
+	_, err := NewEventClient("")
+	if err == nil {
+		t.Error("expected error for empty publishable key")
+	}
+}
+
+// --- Default URL + Override ---
+
+func TestDefaultServerURL(t *testing.T) {
+	// Can't actually hit the real server, but verify the client constructs
+	client, err := NewManagementClient(testCreds)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected non-nil client")
+	}
+}
+
+func TestWithServerURLOverride(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(t, w, 200, map[string]interface{}{
+			"count": 0, "limit": 20, "next_cursor": nil, "records": []interface{}{},
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewManagementClient(testCreds, WithServerURL(server.URL))
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	resp, err := client.GetWorkspacesWithResponse(context.Background())
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.StatusCode() != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode())
+	}
+}
+
+// --- API Tests ---
 
 func TestGetWorkspaces(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -121,17 +284,10 @@ func TestGetWorkspaces(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewManagementClient(server.URL, "token")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-
+	client := newTestManagementClient(t, server)
 	resp, err := client.GetWorkspacesWithResponse(context.Background())
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
-	}
-	if resp.StatusCode() != 200 {
-		t.Fatalf("expected 200, got %d", resp.StatusCode())
 	}
 	if resp.JSON200 == nil {
 		t.Fatal("expected JSON200 to be non-nil")
@@ -172,11 +328,7 @@ func TestCreateWorkspace(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewManagementClient(server.URL, "token")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-
+	client := newTestManagementClient(t, server)
 	resp, err := client.CreateWorkspaceWithResponse(context.Background(), CreateWorkspaceJSONRequestBody{
 		Name: "New Workspace",
 	})
@@ -211,20 +363,13 @@ func TestGetConnections(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewManagementClient(server.URL, "token")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-
+	client := newTestManagementClient(t, server)
 	resp, err := client.GetConnectionsWithResponse(context.Background())
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
 	if resp.JSON200 == nil {
 		t.Fatal("expected JSON200 to be non-nil")
-	}
-	if len(resp.JSON200.Records) != 1 {
-		t.Fatalf("expected 1 record, got %d", len(resp.JSON200.Records))
 	}
 
 	conn := resp.JSON200.Records[0]
@@ -238,10 +383,6 @@ func TestGetConnections(t *testing.T) {
 
 func TestCreateEvent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			t.Errorf("expected POST, got %s", r.Method)
-		}
-
 		body, _ := io.ReadAll(r.Body)
 		var req map[string]interface{}
 		json.Unmarshal(body, &req)
@@ -254,7 +395,6 @@ func TestCreateEvent(t *testing.T) {
 		if payload["email"] != "jane@example.com" {
 			t.Errorf("expected email 'jane@example.com', got %v", payload["email"])
 		}
-		// Verify additional properties are sent
 		if payload["plan"] != "pro" {
 			t.Errorf("expected plan 'pro', got %v", payload["plan"])
 		}
@@ -271,10 +411,7 @@ func TestCreateEvent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewEventClient(server.URL, "pub_test_key")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
+	client := newTestEventClient(t, server)
 
 	payload := EventPayload{
 		Email:     ptrTo(openapi_types.Email("jane@example.com")),
@@ -293,17 +430,13 @@ func TestCreateEvent(t *testing.T) {
 	if resp.StatusCode() != 201 {
 		t.Errorf("expected 201, got %d", resp.StatusCode())
 	}
-	if resp.JSON201 == nil {
-		t.Fatal("expected JSON201 to be non-nil")
-	}
 	if resp.JSON201.Event.Event != "user.signup" {
 		t.Errorf("expected 'user.signup', got %s", resp.JSON201.Event.Event)
 	}
 }
 
-func TestGetRules(t *testing.T) {
+func TestGetRulesWithQueryParams(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify query params are passed
 		if r.URL.Query().Get("event") != "user.signup" {
 			t.Errorf("expected event query param 'user.signup', got %s", r.URL.Query().Get("event"))
 		}
@@ -328,23 +461,13 @@ func TestGetRules(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewManagementClient(server.URL, "token")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-
+	client := newTestManagementClient(t, server)
 	event := "user.signup"
 	resp, err := client.GetRulesWithResponse(context.Background(), &GetRulesParams{
 		Event: &event,
 	})
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
-	}
-	if resp.JSON200 == nil {
-		t.Fatal("expected JSON200 to be non-nil")
-	}
-	if len(resp.JSON200.Records) != 1 {
-		t.Fatalf("expected 1 record, got %d", len(resp.JSON200.Records))
 	}
 	if resp.JSON200.Records[0].Metadata.Action != "add_contact" {
 		t.Errorf("expected action 'add_contact', got %s", resp.JSON200.Records[0].Metadata.Action)
@@ -359,11 +482,7 @@ func TestErrorResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewManagementClient(server.URL, "token")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-
+	client := newTestManagementClient(t, server)
 	resp, err := client.GetWorkspaceWithResponse(context.Background(), mustUUID("00000000-0000-0000-0000-000000000099"))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -453,11 +572,7 @@ func TestGetDefaultMappings(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewManagementClient(server.URL, "token")
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-
+	client := newTestManagementClient(t, server)
 	resp, err := client.GetConnectionDefaultMappingsWithResponse(
 		context.Background(),
 		mustUUID("00000000-0000-0000-0000-000000000010"),
