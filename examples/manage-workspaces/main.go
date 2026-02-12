@@ -72,9 +72,6 @@ func listWorkspaces(ctx context.Context, client *meshes.ClientWithResponses) {
 			fmt.Println("  No workspaces yet. Create one with:")
 			fmt.Println("    go run . create \"My Workspace\"")
 		}
-	case resp.JSON401 != nil:
-		fmt.Printf("Unauthorized: %s\n", resp.JSON401.Message)
-		fmt.Println("Check your MESHES_ACCESS_KEY, MESHES_SECRET_KEY, and MESHES_ORG_ID.")
 	default:
 		fmt.Printf("Unexpected status %d: %s\n", resp.StatusCode(), string(resp.Body))
 	}
@@ -96,10 +93,6 @@ func createWorkspace(ctx context.Context, client *meshes.ClientWithResponses, na
 		fmt.Printf("Workspace created!\n")
 		fmt.Printf("  ID:   %s\n", ws.Id)
 		fmt.Printf("  Name: %s\n", ws.Name)
-	case resp.JSON400 != nil:
-		fmt.Printf("Bad request: %s\n", resp.JSON400.Message)
-	case resp.JSON401 != nil:
-		fmt.Printf("Unauthorized: %s\n", resp.JSON401.Message)
 	default:
 		fmt.Printf("Unexpected status %d: %s\n", resp.StatusCode(), string(resp.Body))
 	}

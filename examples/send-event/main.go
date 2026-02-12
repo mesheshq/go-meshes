@@ -63,10 +63,6 @@ func main() {
 		fmt.Printf("  ID:        %s\n", resp.JSON201.Event.Id)
 		fmt.Printf("  Event:     %s\n", resp.JSON201.Event.Event)
 		fmt.Printf("  Workspace: %s\n", resp.JSON201.Event.Workspace)
-	case resp.JSON400 != nil:
-		fmt.Printf("Bad request: %s\n", resp.JSON400.Message)
-	case resp.JSON401 != nil:
-		fmt.Printf("Unauthorized: %s\n", resp.JSON401.Message)
 	default:
 		fmt.Printf("Unexpected status %d: %s\n", resp.StatusCode(), string(resp.Body))
 	}

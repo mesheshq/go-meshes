@@ -82,9 +82,6 @@ func showConnectionsAndRules(ctx context.Context, client *meshes.ClientWithRespo
 			fmt.Printf("  %-36s  %-12s  %s\n", conn.Id, conn.Type, conn.Name)
 		}
 		fmt.Println()
-	case connResp.JSON401 != nil:
-		fmt.Printf("Unauthorized: %s\n", connResp.JSON401.Message)
-		return
 	default:
 		fmt.Printf("Unexpected status %d: %s\n", connResp.StatusCode(), string(connResp.Body))
 		return
@@ -148,13 +145,6 @@ func createRule(ctx context.Context, client *meshes.ClientWithResponses, connect
 		fmt.Printf("  Active:     %v\n", rule.Active)
 		fmt.Println()
 		fmt.Printf("When a %q event is sent, it will now trigger %q on this connection.\n", event, action)
-	case resp.JSON400 != nil:
-		fmt.Printf("Bad request: %s\n", resp.JSON400.Message)
-	case resp.JSON401 != nil:
-		fmt.Printf("Unauthorized: %s\n", resp.JSON401.Message)
-	case resp.JSON404 != nil:
-		fmt.Printf("Not found: %s\n", resp.JSON404.Message)
-		fmt.Println("Make sure the connection ID is correct.")
 	default:
 		fmt.Printf("Unexpected status %d: %s\n", resp.StatusCode(), string(resp.Body))
 	}
