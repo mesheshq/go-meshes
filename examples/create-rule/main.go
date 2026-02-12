@@ -109,7 +109,7 @@ func showConnectionsAndRules(ctx context.Context, client *meshes.ClientWithRespo
 		fmt.Printf("Found %d rule(s):\n\n", rulesResp.JSON200.Count)
 		for _, rule := range rules {
 			activeStr := "inactive"
-			if rule.Active {
+			if rule.Active != nil && *rule.Active {
 				activeStr = "active"
 			}
 			fmt.Printf("  %-36s  %-20s  %-12s  [%s]\n",
