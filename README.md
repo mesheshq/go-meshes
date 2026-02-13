@@ -127,3 +127,7 @@ case resp.JSON500 != nil:
 ## Generated from OpenAPI
 
 This SDK is generated from the Meshes OpenAPI specification using [oapi-codegen](https://github.com/deepmap/oapi-codegen).
+
+## License
+
+MIT
