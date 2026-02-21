@@ -1,6 +1,6 @@
 module github.com/mesheshq/go-meshes
 
-go 1.21
+go 1.25.7
 
 require (
 	github.com/deepmap/oapi-codegen v1.16.3

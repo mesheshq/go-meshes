@@ -4,6 +4,8 @@ Official Go SDK for the [Meshes](https://meshes.io) API.
 
 ## Installation
 
+Requires **Go 1.25** or later (recommended). The SDK uses generics and may work with Go 1.18+, but is only tested against the latest supported Go release.
+
 ```bash
 go get github.com/mesheshq/go-meshes
 ```
@@ -50,7 +52,39 @@ func main() {
     fmt.Printf("Event created: %s\n", resp.JSON201.Event.Id)
 }
 
+// ptr is a helper that returns a pointer to the given value.
+// The generated OpenAPI types use pointers for optional fields,
+// so this avoids needing temporary variables for every field.
 func ptr[T any](v T) *T { return &v }
+```
+
+### Sending Batch Events
+
+Batch requests support up to **100 events** per call:
+
+```go
+resp, err := client.CreateBulkEventWithResponse(context.Background(), meshes.CreateBulkEventJSONRequestBody{
+    Events: []meshes.EventInput{
+        {
+            Event: "user.signup",
+            Payload: meshes.EventPayload{
+                Email:     ptr(openapi_types.Email("jane@example.com")),
+                FirstName: ptr("Jane"),
+            },
+        },
+        {
+            Event: "membership.started",
+            Payload: meshes.EventPayload{
+                Email: ptr(openapi_types.Email("jane@example.com")),
+            },
+        },
+    },
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Batch accepted: %d events\n", len(resp.JSON201.Events))
 ```
 
 ### Management API (Machine Key Auth)
@@ -58,34 +92,56 @@ func ptr[T any](v T) *T { return &v }
 The management client automatically mints short-lived HS256 JWTs (30s expiry) for each request using your machine key credentials. No manual token management needed.
 
 ```go
+package main
+
 import (
+    "context"
+    "fmt"
+    "log"
     "os"
+
     meshes "github.com/mesheshq/go-meshes"
 )
 
-client, err := meshes.NewManagementClient(meshes.MeshesCredentials{
-    AccessKey: os.Getenv("MESHES_ACCESS_KEY"),
-    SecretKey: os.Getenv("MESHES_SECRET_KEY"),
-    OrgID:     os.Getenv("MESHES_ORG_ID"),
-})
-if err != nil {
-    log.Fatal(err)
+func main() {
+    client, err := meshes.NewManagementClient(meshes.MeshesCredentials{
+        AccessKey: os.Getenv("MESHES_ACCESS_KEY"),
+        SecretKey: os.Getenv("MESHES_SECRET_KEY"),
+        OrgID:     os.Getenv("MESHES_ORG_ID"),
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // List workspaces
+    workspaces, err := client.GetWorkspacesWithResponse(context.Background())
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    for _, ws := range workspaces.JSON200.Records {
+        fmt.Printf("Workspace: %s (%s)\n", ws.Name, ws.Id)
+    }
+
+    // List connections, get rules, manage mappings, etc.
+    connections, _ := client.GetWorkspaceConnectionsWithResponse(context.Background(), workspaceID)
+
+    event := "user.signup"
+    rules, _ := client.GetRulesWithResponse(context.Background(), &meshes.GetRulesParams{Event: &event})
+
+    mappings, _ := client.GetConnectionDefaultMappingsWithResponse(context.Background(), connectionID)
 }
-
-// List workspaces
-workspaces, err := client.GetWorkspacesWithResponse(context.Background())
-for _, ws := range workspaces.JSON200.Records {
-    fmt.Printf("Workspace: %s (%s)\n", ws.Name, ws.Id)
-}
-
-// List connections, get rules, manage mappings, etc.
-connections, _ := client.GetWorkspaceConnectionsWithResponse(ctx, workspaceID)
-
-event := "user.signup"
-rules, _ := client.GetRulesWithResponse(ctx, &meshes.GetRulesParams{Event: &event})
-
-mappings, _ := client.GetConnectionDefaultMappingsWithResponse(ctx, connectionID)
 ```
+
+## Retries
+
+This SDK is a **thin client** — it sends events to Meshes and does **not** retry on its own. Once Meshes accepts an event (2xx response), retries and delivery guarantees are handled server-side by the Meshes platform.
+
+This means:
+
+- Your application code stays simple with no retry loops or backoff logic
+- Meshes handles retrying failed deliveries to downstream integrations (HubSpot, Salesforce, etc.) with exponential backoff
+- If the initial request to Meshes fails (network error, 5xx), the SDK returns an error that you can handle as needed
 
 ## Authentication
 
@@ -104,9 +160,39 @@ The SDK defaults to `https://api.meshes.io`. To override (e.g. for local develop
 client, err := meshes.NewManagementClient(creds, meshes.WithServerURL("http://localhost:3000"))
 ```
 
-## Response Handling
+## Timeouts
 
-All `*WithResponse` methods return typed response structs with fields for each possible status code:
+Use Go's standard `context.WithTimeout` to set request deadlines:
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+resp, err := client.CreateEventWithResponse(ctx, meshes.CreateEventJSONRequestBody{
+    Event:   "user.signup",
+    Payload: payload,
+})
+if err != nil {
+    // may be a context.DeadlineExceeded error
+    log.Fatal(err)
+}
+```
+
+## Error Handling
+
+The SDK returns two kinds of errors:
+
+**Transport errors** — returned as a standard Go `error` when the request fails at the network level (DNS, connection refused, timeout, etc.):
+
+```go
+resp, err := client.CreateEventWithResponse(ctx, body)
+if err != nil {
+    // Network or transport error — request never reached Meshes
+    log.Fatal(err)
+}
+```
+
+**API errors** — when the request reaches Meshes but returns a non-2xx status. All `*WithResponse` methods return typed response structs with fields for each possible status code:
 
 ```go
 resp, err := client.GetWorkspaceWithResponse(ctx, workspaceID)
@@ -121,12 +207,14 @@ case resp.JSON404 != nil:
     fmt.Println("Not found:", resp.JSON404.Message)
 case resp.JSON500 != nil:
     fmt.Println("Server error:", resp.JSON500.Message)
+default:
+    fmt.Printf("Unexpected status: %d\n", resp.StatusCode())
 }
 ```
 
-## Generated from OpenAPI
+## Dependencies
 
-This SDK is generated from the Meshes OpenAPI specification using [oapi-codegen](https://github.com/deepmap/oapi-codegen).
+This SDK is generated from the Meshes OpenAPI specification using [oapi-codegen](https://github.com/deepmap/oapi-codegen). As a result, event payloads use `openapi_types.Email` from the `oapi-codegen` package for the email field type. This is re-exported through the SDK's `EventPayload` struct — you only need to import it directly when constructing payloads with typed email fields.
 
 ## License
 
