@@ -133,8 +133,11 @@ func main() {
 
     mappings, _ := client.GetConnectionDefaultMappingsWithResponse(context.Background(), connectionID)
 
+    _ = connections
     _ = eventTypes
     _ = resources
+    _ = rules
+    _ = mappings
 }
 ```
 
@@ -173,7 +176,7 @@ if len(sessions.JSON200.Records) > 0 {
 
 ## Retries
 
-This SDK is a **thin client** — it sends events to Meshes and does **not** retry on its own. Once Meshes accepts an event (2xx response), retries and delivery guarantees are handled server-side by the Meshes platform.
+This SDK is a **thin client**: it sends events to Meshes and does **not** retry on its own. Once Meshes accepts an event (2xx response), retries and delivery guarantees are handled server-side by the Meshes platform.
 
 This means:
 
@@ -188,11 +191,11 @@ This means:
 | Machine Key (HS256 JWT) | Management APIs (workspaces, connections, rules, mappings, sessions) | `NewManagementClient(creds)` |
 | Publishable Key | Event ingestion (CreateEvent, CreateBulkEvent) | `NewEventClient(key)` |
 
-The management client handles JWT generation automatically — each request gets a fresh token signed with your secret key. Tokens expire in 30 seconds. See [Authentication docs](https://meshes.io/docs/api/authentication) for details.
+The management client handles JWT generation automatically; each request gets a fresh token signed with your secret key. Tokens expire in 30 seconds. See [Authentication docs](https://meshes.io/docs/api/authentication) for details.
 
 ## Configuration
 
-The SDK defaults to `https://api.meshes.io`. To override (e.g. for local development):
+The SDK defaults to `https://api.meshes.io`. To override (for local development, for example):
 
 ```go
 client, err := meshes.NewManagementClient(creds, meshes.WithServerURL("http://localhost:3000"))
@@ -220,17 +223,17 @@ if err != nil {
 
 The SDK returns two kinds of errors:
 
-**Transport errors** — returned as a standard Go `error` when the request fails at the network level (DNS, connection refused, timeout, etc.):
+**Transport errors**: returned as a standard Go `error` when the request fails at the network level (DNS, connection refused, timeout, etc.):
 
 ```go
 resp, err := client.CreateEventWithResponse(ctx, body)
 if err != nil {
-    // Network or transport error — request never reached Meshes
+    // Network or transport error: request never reached Meshes
     log.Fatal(err)
 }
 ```
 
-**API errors** — when the request reaches Meshes but returns a non-2xx status. All `*WithResponse` methods return typed response structs with fields for each possible status code:
+**API errors**: when the request reaches Meshes but returns a non-2xx status. All `*WithResponse` methods return typed response structs with fields for each possible status code:
 
 ```go
 resp, err := client.GetWorkspaceWithResponse(ctx, workspaceID)
@@ -252,7 +255,7 @@ default:
 
 ## Dependencies
 
-This SDK is generated from the Meshes OpenAPI specification using [oapi-codegen](https://github.com/deepmap/oapi-codegen). As a result, event payloads use `openapi_types.Email` from the `oapi-codegen` package for the email field type. This is re-exported through the SDK's `EventPayload` struct — you only need to import it directly when constructing payloads with typed email fields.
+This SDK is generated from the Meshes OpenAPI specification using [oapi-codegen](https://github.com/deepmap/oapi-codegen). As a result, event payloads use `openapi_types.Email` from the `oapi-codegen` package for the email field type. This is re-exported through the SDK's `EventPayload` struct; you only need to import it directly when constructing payloads with typed email fields.
 
 ## License
 
