@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	openapi_types "github.com/deepmap/oapi-codegen/pkg/types"
+	"github.com/google/uuid"
 )
 
 // --- Helpers ---
@@ -471,6 +471,344 @@ func TestGetRulesWithQueryParams(t *testing.T) {
 	}
 	if resp.JSON200.Records[0].Metadata.Action != "add_contact" {
 		t.Errorf("expected action 'add_contact', got %s", resp.JSON200.Records[0].Metadata.Action)
+	}
+}
+
+func TestListSessionsWithQueryParams(t *testing.T) {
+	workspaceID := mustUUID("00000000-0000-0000-0000-0000000000aa")
+	limit := 10
+	cursor := "cursor_123"
+	status := Active
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/sessions" {
+			t.Errorf("expected /api/v1/sessions, got %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("workspace_id"); got != workspaceID.String() {
+			t.Errorf("expected workspace_id %s, got %s", workspaceID, got)
+		}
+		if got := r.URL.Query().Get("limit"); got != "10" {
+			t.Errorf("expected limit 10, got %s", got)
+		}
+		if got := r.URL.Query().Get("cursor"); got != cursor {
+			t.Errorf("expected cursor %s, got %s", cursor, got)
+		}
+		if got := r.URL.Query().Get("status"); got != string(status) {
+			t.Errorf("expected status %s, got %s", status, got)
+		}
+
+		jsonResponse(t, w, 200, map[string]interface{}{
+			"count":       1,
+			"limit":       10,
+			"next_cursor": nil,
+			"records": []map[string]interface{}{
+				{
+					"created_at":       "2024-02-01T10:00:00Z",
+					"expires_at":       "2024-02-01T10:30:00Z",
+					"external_user_id": "user_ext_123",
+					"is_expired":       false,
+					"role":             "member",
+					"session_id":       "sess_123",
+					"status":           "active",
+					"workspace_id":     workspaceID.String(),
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestManagementClient(t, server)
+	resp, err := client.ListSessionsWithResponse(context.Background(), &ListSessionsParams{
+		Limit:       &limit,
+		Cursor:      &cursor,
+		WorkspaceId: workspaceID,
+		Status:      &status,
+	})
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.JSON200 == nil {
+		t.Fatal("expected JSON200 to be non-nil")
+	}
+	if resp.JSON200.Count != 1 {
+		t.Fatalf("expected count 1, got %d", resp.JSON200.Count)
+	}
+	record := resp.JSON200.Records[0]
+	if record.SessionId != "sess_123" {
+		t.Errorf("expected session ID sess_123, got %s", record.SessionId)
+	}
+	if record.Role != "member" {
+		t.Errorf("expected role member, got %s", record.Role)
+	}
+	if record.ExternalUserId == nil || *record.ExternalUserId != "user_ext_123" {
+		t.Fatalf("expected external_user_id user_ext_123, got %v", record.ExternalUserId)
+	}
+}
+
+func TestCreateSession(t *testing.T) {
+	workspaceID := mustUUID("00000000-0000-0000-0000-0000000000ab")
+	externalUserID := "user_ext_456"
+	launchPath := "/dashboard"
+	launchTTLSeconds := 300
+	role := Member
+	scopes := []CreateSessionJSONBodyScopes{EventsPayloadRead}
+	ttlSeconds := 1800
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/sessions" {
+			t.Errorf("expected /api/v1/sessions, got %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Errorf("expected application/json content type, got %s", got)
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("failed to read request body: %v", err)
+		}
+
+		var req map[string]interface{}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+
+		if req["workspace_id"] != workspaceID.String() {
+			t.Errorf("expected workspace_id %s, got %v", workspaceID, req["workspace_id"])
+		}
+		if req["external_user_id"] != externalUserID {
+			t.Errorf("expected external_user_id %s, got %v", externalUserID, req["external_user_id"])
+		}
+		if req["launch_path"] != launchPath {
+			t.Errorf("expected launch_path %s, got %v", launchPath, req["launch_path"])
+		}
+		if req["role"] != string(role) {
+			t.Errorf("expected role %s, got %v", role, req["role"])
+		}
+
+		allowedOrigins, ok := req["allowed_origins"].([]interface{})
+		if !ok || len(allowedOrigins) != 2 {
+			t.Fatalf("expected two allowed origins, got %v", req["allowed_origins"])
+		}
+		if allowedOrigins[0] != "https://app.example.com" || allowedOrigins[1] != "https://admin.example.com" {
+			t.Errorf("unexpected allowed_origins: %v", allowedOrigins)
+		}
+
+		scopeValues, ok := req["scopes"].([]interface{})
+		if !ok || len(scopeValues) != 1 || scopeValues[0] != string(EventsPayloadRead) {
+			t.Fatalf("expected scopes [%s], got %v", EventsPayloadRead, req["scopes"])
+		}
+
+		if req["launch_ttl_seconds"] != float64(launchTTLSeconds) {
+			t.Errorf("expected launch_ttl_seconds %d, got %v", launchTTLSeconds, req["launch_ttl_seconds"])
+		}
+		if req["ttl_seconds"] != float64(ttlSeconds) {
+			t.Errorf("expected ttl_seconds %d, got %v", ttlSeconds, req["ttl_seconds"])
+		}
+
+		jsonResponse(t, w, 200, map[string]interface{}{
+			"access_token":      "access_123",
+			"expires_at":        "2024-02-01T10:30:00Z",
+			"expires_in":        1800,
+			"launch_expires_at": "2024-02-01T10:10:00Z",
+			"launch_token":      "launch_123",
+			"launch_url":        "https://app.meshes.io/launch/launch_123",
+			"role":              "member",
+			"session_id":        "sess_456",
+			"workspace_id":      workspaceID.String(),
+		})
+	}))
+	defer server.Close()
+
+	client := newTestManagementClient(t, server)
+	resp, err := client.CreateSessionWithResponse(context.Background(), CreateSessionJSONRequestBody{
+		AllowedOrigins:   &[]string{"https://app.example.com", "https://admin.example.com"},
+		ExternalUserId:   &externalUserID,
+		LaunchPath:       &launchPath,
+		LaunchTtlSeconds: &launchTTLSeconds,
+		Role:             &role,
+		Scopes:           &scopes,
+		TtlSeconds:       &ttlSeconds,
+		WorkspaceId:      workspaceID,
+	})
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.JSON200 == nil {
+		t.Fatal("expected JSON200 to be non-nil")
+	}
+	if resp.JSON200.SessionId != "sess_456" {
+		t.Errorf("expected session ID sess_456, got %s", resp.JSON200.SessionId)
+	}
+	if resp.JSON200.Role != "member" {
+		t.Errorf("expected role member, got %s", resp.JSON200.Role)
+	}
+	if resp.JSON200.WorkspaceId != workspaceID.String() {
+		t.Errorf("expected workspace ID %s, got %s", workspaceID, resp.JSON200.WorkspaceId)
+	}
+}
+
+func TestRevokeSession(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Errorf("expected DELETE, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/sessions/sess_revoke" {
+			t.Errorf("expected revoke path, got %s", r.URL.Path)
+		}
+
+		jsonResponse(t, w, 200, map[string]interface{}{
+			"revoked": true,
+		})
+	}))
+	defer server.Close()
+
+	client := newTestManagementClient(t, server)
+	resp, err := client.RevokeSessionWithResponse(context.Background(), "sess_revoke")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.JSON200 == nil {
+		t.Fatal("expected JSON200 to be non-nil")
+	}
+	if !resp.JSON200.Revoked {
+		t.Error("expected revoked=true")
+	}
+}
+
+func TestRefreshSession(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/sessions/sess_refresh/refresh" {
+			t.Errorf("expected refresh path, got %s", r.URL.Path)
+		}
+
+		jsonResponse(t, w, 200, map[string]interface{}{
+			"access_token": "access_refresh_123",
+			"expires_at":   "2024-02-01T11:00:00Z",
+			"expires_in":   1200,
+			"role":         "admin",
+			"session_id":   "sess_refresh",
+			"workspace_id": "00000000-0000-0000-0000-0000000000ac",
+		})
+	}))
+	defer server.Close()
+
+	client := newTestManagementClient(t, server)
+	resp, err := client.RefreshSessionWithResponse(context.Background(), "sess_refresh")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.JSON200 == nil {
+		t.Fatal("expected JSON200 to be non-nil")
+	}
+	if resp.JSON200.AccessToken != "access_refresh_123" {
+		t.Errorf("expected access token access_refresh_123, got %s", resp.JSON200.AccessToken)
+	}
+	if resp.JSON200.Role != "admin" {
+		t.Errorf("expected role admin, got %s", resp.JSON200.Role)
+	}
+	if resp.JSON200.SessionId != "sess_refresh" {
+		t.Errorf("expected session ID sess_refresh, got %s", resp.JSON200.SessionId)
+	}
+}
+
+func TestGetWorkspaceEventTypes(t *testing.T) {
+	workspaceID := mustUUID("00000000-0000-0000-0000-0000000000ad")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/workspaces/"+workspaceID.String()+"/event-types" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+
+		jsonResponse(t, w, 200, []map[string]interface{}{
+			{
+				"id":          "00000000-0000-0000-0000-000000000101",
+				"key":         "user.signup",
+				"label":       "User Signup",
+				"description": "Triggered when a user signs up",
+				"active":      true,
+				"created_at":  "2024-02-01T09:00:00Z",
+				"updated_at":  "2024-02-01T09:30:00Z",
+				"created_by":  "user_123",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestManagementClient(t, server)
+	resp, err := client.GetWorkspaceEventTypesWithResponse(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.JSON200 == nil {
+		t.Fatal("expected JSON200 to be non-nil")
+	}
+	if len(*resp.JSON200) != 1 {
+		t.Fatalf("expected 1 event type, got %d", len(*resp.JSON200))
+	}
+	eventType := (*resp.JSON200)[0]
+	if eventType.Key != "user.signup" {
+		t.Errorf("expected key user.signup, got %s", eventType.Key)
+	}
+	if eventType.Description == nil || *eventType.Description != "Triggered when a user signs up" {
+		t.Fatalf("expected description to be populated, got %v", eventType.Description)
+	}
+}
+
+func TestGetWorkspaceResources(t *testing.T) {
+	workspaceID := mustUUID("00000000-0000-0000-0000-0000000000ae")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/workspaces/"+workspaceID.String()+"/resources" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+
+		jsonResponse(t, w, 200, []map[string]interface{}{
+			{
+				"id":          "00000000-0000-0000-0000-000000000201",
+				"key":         "contacts",
+				"label":       "Contacts",
+				"description": "People synced into downstream systems",
+				"active":      true,
+				"created_at":  "2024-02-01T09:00:00Z",
+				"updated_at":  "2024-02-01T09:45:00Z",
+				"created_by":  "user_456",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestManagementClient(t, server)
+	resp, err := client.GetWorkspaceResourcesWithResponse(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.JSON200 == nil {
+		t.Fatal("expected JSON200 to be non-nil")
+	}
+	if len(*resp.JSON200) != 1 {
+		t.Fatalf("expected 1 resource, got %d", len(*resp.JSON200))
+	}
+	resource := (*resp.JSON200)[0]
+	if resource.Key != "contacts" {
+		t.Errorf("expected key contacts, got %s", resource.Key)
+	}
+	if resource.Label != "Contacts" {
+		t.Errorf("expected label Contacts, got %s", resource.Label)
 	}
 }
 
