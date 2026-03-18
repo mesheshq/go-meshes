@@ -12,6 +12,9 @@ type N201RuleType = string
 // N200Status is used by several 200 responses for "status" fields
 type N200Status = string
 
+// N200Role is used by several 200 responses for "role" fields
+type N200Role = string
+
 // N200RecordsType is the type field on records in list responses
 type N200RecordsType = string
 

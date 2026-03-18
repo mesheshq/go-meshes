@@ -123,13 +123,51 @@ func main() {
         fmt.Printf("Workspace: %s (%s)\n", ws.Name, ws.Id)
     }
 
-    // List connections, get rules, manage mappings, etc.
+    // List connections, get rules, inspect workspace metadata, manage sessions, etc.
     connections, _ := client.GetWorkspaceConnectionsWithResponse(context.Background(), workspaceID)
+    eventTypes, _ := client.GetWorkspaceEventTypesWithResponse(context.Background(), workspaceID)
+    resources, _ := client.GetWorkspaceResourcesWithResponse(context.Background(), workspaceID)
 
     event := "user.signup"
     rules, _ := client.GetRulesWithResponse(context.Background(), &meshes.GetRulesParams{Event: &event})
 
     mappings, _ := client.GetConnectionDefaultMappingsWithResponse(context.Background(), connectionID)
+
+    _ = eventTypes
+    _ = resources
+}
+```
+
+### Creating And Managing Sessions
+
+Use the management client to create short-lived workspace sessions, then refresh or revoke them later by `session_id`:
+
+```go
+role := meshes.Member
+allowedOrigins := []string{"https://app.example.com"}
+scopes := []meshes.CreateSessionJSONBodyScopes{meshes.EventsPayloadRead}
+launchPath := "/dashboard"
+
+session, err := client.CreateSessionWithResponse(context.Background(), meshes.CreateSessionJSONRequestBody{
+    WorkspaceId:    workspaceID,
+    AllowedOrigins: &allowedOrigins,
+    LaunchPath:     &launchPath,
+    Role:           &role,
+    Scopes:         &scopes,
+})
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Printf("Launch URL: %s\n", session.JSON200.LaunchUrl)
+
+sessions, _ := client.ListSessionsWithResponse(context.Background(), &meshes.ListSessionsParams{
+    WorkspaceId: workspaceID,
+})
+
+if len(sessions.JSON200.Records) > 0 {
+    _, _ = client.RefreshSessionWithResponse(context.Background(), sessions.JSON200.Records[0].SessionId)
+    _, _ = client.RevokeSessionWithResponse(context.Background(), sessions.JSON200.Records[0].SessionId)
 }
 ```
 
@@ -147,7 +185,7 @@ This means:
 
 | Method | Use Case | Constructor |
 |--------|----------|-------------|
-| Machine Key (HS256 JWT) | Management APIs (workspaces, connections, rules, mappings) | `NewManagementClient(creds)` |
+| Machine Key (HS256 JWT) | Management APIs (workspaces, connections, rules, mappings, sessions) | `NewManagementClient(creds)` |
 | Publishable Key | Event ingestion (CreateEvent, CreateBulkEvent) | `NewEventClient(key)` |
 
 The management client handles JWT generation automatically — each request gets a fresh token signed with your secret key. Tokens expire in 30 seconds. See [Authentication docs](https://meshes.io/docs/api/authentication) for details.
