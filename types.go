@@ -15,6 +15,15 @@ type N200Status = string
 // N200Role is used by several 200 responses for "role" fields
 type N200Role = string
 
+// N200RecordsRole is the role field on session list records
+type N200RecordsRole = string
+
+// N200SessionType is the session_type field on session responses
+type N200SessionType = string
+
+// N200RecordsSessionType is the session_type field on session list records
+type N200RecordsSessionType = string
+
 // N200RecordsType is the type field on records in list responses
 type N200RecordsType = string
 
