@@ -81,6 +81,14 @@ const (
 	Revoked ListSessionsParamsStatus = "revoked"
 )
 
+// Defines values for CreateSessionJSONBodyLaunchPage.
+const (
+	CreateSessionJSONBodyLaunchPageConnections CreateSessionJSONBodyLaunchPage = "connections"
+	CreateSessionJSONBodyLaunchPageDashboard   CreateSessionJSONBodyLaunchPage = "dashboard"
+	CreateSessionJSONBodyLaunchPageEvents      CreateSessionJSONBodyLaunchPage = "events"
+	CreateSessionJSONBodyLaunchPageRules       CreateSessionJSONBodyLaunchPage = "rules"
+)
+
 // Defines values for CreateSessionJSONBodyRole.
 const (
 	Admin  CreateSessionJSONBodyRole = "admin"
@@ -91,6 +99,13 @@ const (
 // Defines values for CreateSessionJSONBodyScopes.
 const (
 	EventsPayloadRead CreateSessionJSONBodyScopes = "events.payload:read"
+)
+
+// Defines values for CreateSessionJSONBodySessionType.
+const (
+	CreateSessionJSONBodySessionTypeDashboard CreateSessionJSONBodySessionType = "dashboard"
+	CreateSessionJSONBodySessionTypeResource  CreateSessionJSONBodySessionType = "resource"
+	CreateSessionJSONBodySessionTypeWorkspace CreateSessionJSONBodySessionType = "workspace"
 )
 
 // Defines values for GetWorkspaceEventsParamsStatus.
@@ -282,6 +297,8 @@ type ListSessionsParams struct {
 	Cursor      *string                   `form:"cursor,omitempty" json:"cursor,omitempty"`
 	WorkspaceId openapi_types.UUID        `form:"workspace_id" json:"workspace_id"`
 	Status      *ListSessionsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Resource    *string                   `form:"resource,omitempty" json:"resource,omitempty"`
+	ResourceId  *string                   `form:"resource_id,omitempty" json:"resource_id,omitempty"`
 }
 
 // ListSessionsParamsStatus defines parameters for ListSessions.
@@ -289,21 +306,32 @@ type ListSessionsParamsStatus string
 
 // CreateSessionJSONBody defines parameters for CreateSession.
 type CreateSessionJSONBody struct {
-	AllowedOrigins   *[]string                      `json:"allowed_origins,omitempty"`
-	ExternalUserId   *string                        `json:"external_user_id,omitempty"`
-	LaunchPath       *string                        `json:"launch_path,omitempty"`
-	LaunchTtlSeconds *int                           `json:"launch_ttl_seconds,omitempty"`
-	Role             *CreateSessionJSONBodyRole     `json:"role,omitempty"`
-	Scopes           *[]CreateSessionJSONBodyScopes `json:"scopes,omitempty"`
-	TtlSeconds       *int                           `json:"ttl_seconds,omitempty"`
-	WorkspaceId      openapi_types.UUID             `json:"workspace_id"`
+	AllowedOrigins *[]string `json:"allowed_origins,omitempty"`
+	ExternalUserId *string   `json:"external_user_id,omitempty"`
+
+	// LaunchPage Initial embed landing page. This selects only the top-level page; nested pages such as Event Detail and Connection Mappings remain controlled by route policy and in-app navigation.
+	LaunchPage       *CreateSessionJSONBodyLaunchPage  `json:"launch_page,omitempty"`
+	LaunchTtlSeconds *int                              `json:"launch_ttl_seconds,omitempty"`
+	Resource         *string                           `json:"resource,omitempty"`
+	ResourceId       *string                           `json:"resource_id,omitempty"`
+	Role             *CreateSessionJSONBodyRole        `json:"role,omitempty"`
+	Scopes           *[]CreateSessionJSONBodyScopes    `json:"scopes,omitempty"`
+	SessionType      *CreateSessionJSONBodySessionType `json:"session_type,omitempty"`
+	TtlSeconds       *int                              `json:"ttl_seconds,omitempty"`
+	WorkspaceId      openapi_types.UUID                `json:"workspace_id"`
 }
+
+// CreateSessionJSONBodyLaunchPage defines parameters for CreateSession.
+type CreateSessionJSONBodyLaunchPage string
 
 // CreateSessionJSONBodyRole defines parameters for CreateSession.
 type CreateSessionJSONBodyRole string
 
 // CreateSessionJSONBodyScopes defines parameters for CreateSession.
 type CreateSessionJSONBodyScopes string
+
+// CreateSessionJSONBodySessionType defines parameters for CreateSession.
+type CreateSessionJSONBodySessionType string
 
 // CreateWorkspaceJSONBody defines parameters for CreateWorkspace.
 type CreateWorkspaceJSONBody struct {
@@ -329,6 +357,13 @@ type GetWorkspaceEventsParams struct {
 
 // GetWorkspaceEventsParamsStatus defines parameters for GetWorkspaceEvents.
 type GetWorkspaceEventsParamsStatus string
+
+// GetWorkspaceRulesParams defines parameters for GetWorkspaceRules.
+type GetWorkspaceRulesParams struct {
+	Event      *string `form:"event,omitempty" json:"event,omitempty"`
+	Resource   *string `form:"resource,omitempty" json:"resource,omitempty"`
+	ResourceId *string `form:"resource_id,omitempty" json:"resource_id,omitempty"`
+}
 
 // CreateConnectionJSONRequestBody defines body for CreateConnection for application/json ContentType.
 type CreateConnectionJSONRequestBody CreateConnectionJSONBody
@@ -956,7 +991,7 @@ type ClientInterface interface {
 	GetWorkspaceResources(ctx context.Context, workspaceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetWorkspaceRules request
-	GetWorkspaceRules(ctx context.Context, workspaceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetWorkspaceRules(ctx context.Context, workspaceId openapi_types.UUID, params *GetWorkspaceRulesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) GetConnections(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -1463,8 +1498,8 @@ func (c *Client) GetWorkspaceResources(ctx context.Context, workspaceId openapi_
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetWorkspaceRules(ctx context.Context, workspaceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetWorkspaceRulesRequest(c.Server, workspaceId)
+func (c *Client) GetWorkspaceRules(ctx context.Context, workspaceId openapi_types.UUID, params *GetWorkspaceRulesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetWorkspaceRulesRequest(c.Server, workspaceId, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2393,6 +2428,38 @@ func NewListSessionsRequest(server string, params *ListSessionsParams) (*http.Re
 
 		}
 
+		if params.Resource != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "resource", runtime.ParamLocationQuery, *params.Resource); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.ResourceId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "resource_id", runtime.ParamLocationQuery, *params.ResourceId); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
 		queryURL.RawQuery = queryValues.Encode()
 	}
 
@@ -2899,7 +2966,7 @@ func NewGetWorkspaceResourcesRequest(server string, workspaceId openapi_types.UU
 }
 
 // NewGetWorkspaceRulesRequest generates requests for GetWorkspaceRules
-func NewGetWorkspaceRulesRequest(server string, workspaceId openapi_types.UUID) (*http.Request, error) {
+func NewGetWorkspaceRulesRequest(server string, workspaceId openapi_types.UUID, params *GetWorkspaceRulesParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -2922,6 +2989,60 @@ func NewGetWorkspaceRulesRequest(server string, workspaceId openapi_types.UUID) 
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Event != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "event", runtime.ParamLocationQuery, *params.Event); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Resource != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "resource", runtime.ParamLocationQuery, *params.Resource); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.ResourceId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "resource_id", runtime.ParamLocationQuery, *params.ResourceId); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
 	}
 
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
@@ -3092,7 +3213,7 @@ type ClientWithResponsesInterface interface {
 	GetWorkspaceResourcesWithResponse(ctx context.Context, workspaceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetWorkspaceResourcesResponse, error)
 
 	// GetWorkspaceRules request
-	GetWorkspaceRulesWithResponse(ctx context.Context, workspaceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetWorkspaceRulesResponse, error)
+	GetWorkspaceRulesWithResponse(ctx context.Context, workspaceId openapi_types.UUID, params *GetWorkspaceRulesParams, reqEditors ...RequestEditorFn) (*GetWorkspaceRulesResponse, error)
 }
 
 type GetConnectionsResponse struct {
@@ -3136,6 +3257,10 @@ type CreateConnectionResponse struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
+	JSON403 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
 	JSON409 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
@@ -3168,6 +3293,10 @@ type DeleteConnectionResponse struct {
 	JSON200      *struct {
 		Id   string   `json:"id"`
 		Type N200Type `json:"type"`
+	}
+	JSON403 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
 	}
 	JSON404 *struct {
 		Error   *interface{} `json:"error,omitempty"`
@@ -3237,6 +3366,10 @@ type UpdateConnectionResponse struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
+	JSON403 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
 	JSON404 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
@@ -3267,7 +3400,11 @@ type GetConnectionActionsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *interface{}
-	JSON404      *struct {
+	JSON403      *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
+	JSON404 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
@@ -3326,6 +3463,10 @@ type GetConnectionFieldsResponse struct {
 		UpdatedAt       time.Time           `json:"updated_at"`
 		WorkspaceId     openapi_types.UUID  `json:"workspace_id"`
 	}
+	JSON403 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
 	JSON404 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
@@ -3377,6 +3518,10 @@ type GetConnectionDefaultMappingsResponse struct {
 		} `json:"mapping"`
 		Status N200Status `json:"status"`
 	}
+	JSON403 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
 	JSON404 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
@@ -3427,6 +3572,10 @@ type UpdateConnectionDefaultMappingsResponse struct {
 			WorkspaceId     openapi_types.UUID         `json:"workspace_id"`
 		} `json:"mapping"`
 		Status N200Status `json:"status"`
+	}
+	JSON403 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
 	}
 	JSON404 *struct {
 		Error   *interface{} `json:"error,omitempty"`
@@ -3939,6 +4088,10 @@ type CreateRuleResponse struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
+	JSON403 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
 	JSON404 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
@@ -4058,14 +4211,17 @@ type ListSessionsResponse struct {
 		Limit      int     `json:"limit"`
 		NextCursor *string `json:"next_cursor"`
 		Records    []struct {
-			CreatedAt      string  `json:"created_at"`
-			ExpiresAt      string  `json:"expires_at"`
-			ExternalUserId *string `json:"external_user_id,omitempty"`
-			IsExpired      bool    `json:"is_expired"`
-			Role           string  `json:"role"`
-			SessionId      string  `json:"session_id"`
-			Status         string  `json:"status"`
-			WorkspaceId    string  `json:"workspace_id"`
+			CreatedAt      string                 `json:"created_at"`
+			ExpiresAt      string                 `json:"expires_at"`
+			ExternalUserId *string                `json:"external_user_id,omitempty"`
+			IsExpired      bool                   `json:"is_expired"`
+			Resource       *string                `json:"resource,omitempty"`
+			ResourceId     *string                `json:"resource_id,omitempty"`
+			Role           N200RecordsRole        `json:"role"`
+			SessionId      string                 `json:"session_id"`
+			SessionType    N200RecordsSessionType `json:"session_type"`
+			Status         string                 `json:"status"`
+			WorkspaceId    string                 `json:"workspace_id"`
 		} `json:"records"`
 	}
 	JSON401 *struct {
@@ -4106,15 +4262,22 @@ type CreateSessionResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
-		AccessToken     string    `json:"access_token"`
-		ExpiresAt       time.Time `json:"expires_at"`
-		ExpiresIn       float32   `json:"expires_in"`
-		LaunchExpiresAt time.Time `json:"launch_expires_at"`
-		LaunchToken     string    `json:"launch_token"`
-		LaunchUrl       string    `json:"launch_url"`
-		Role            N200Role  `json:"role"`
-		SessionId       string    `json:"session_id"`
-		WorkspaceId     string    `json:"workspace_id"`
+		AccessToken     string          `json:"access_token"`
+		ExpiresAt       time.Time       `json:"expires_at"`
+		ExpiresIn       float32         `json:"expires_in"`
+		LaunchExpiresAt time.Time       `json:"launch_expires_at"`
+		LaunchToken     string          `json:"launch_token"`
+		LaunchUrl       string          `json:"launch_url"`
+		Resource        *string         `json:"resource,omitempty"`
+		ResourceId      *string         `json:"resource_id,omitempty"`
+		Role            N200Role        `json:"role"`
+		SessionId       string          `json:"session_id"`
+		SessionType     N200SessionType `json:"session_type"`
+		WorkspaceId     string          `json:"workspace_id"`
+	}
+	JSON400 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
 	}
 	JSON401 *struct {
 		Error   *interface{} `json:"error,omitempty"`
@@ -4194,12 +4357,15 @@ type RefreshSessionResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
-		AccessToken string    `json:"access_token"`
-		ExpiresAt   time.Time `json:"expires_at"`
-		ExpiresIn   float32   `json:"expires_in"`
-		Role        N200Role  `json:"role"`
-		SessionId   string    `json:"session_id"`
-		WorkspaceId string    `json:"workspace_id"`
+		AccessToken string          `json:"access_token"`
+		ExpiresAt   time.Time       `json:"expires_at"`
+		ExpiresIn   float32         `json:"expires_in"`
+		Resource    *string         `json:"resource,omitempty"`
+		ResourceId  *string         `json:"resource_id,omitempty"`
+		Role        N200Role        `json:"role"`
+		SessionId   string          `json:"session_id"`
+		SessionType N200SessionType `json:"session_type"`
+		WorkspaceId string          `json:"workspace_id"`
 	}
 	JSON401 *struct {
 		Error   *interface{} `json:"error,omitempty"`
@@ -4982,8 +5148,8 @@ func (c *ClientWithResponses) GetWorkspaceResourcesWithResponse(ctx context.Cont
 }
 
 // GetWorkspaceRulesWithResponse request returning *GetWorkspaceRulesResponse
-func (c *ClientWithResponses) GetWorkspaceRulesWithResponse(ctx context.Context, workspaceId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetWorkspaceRulesResponse, error) {
-	rsp, err := c.GetWorkspaceRules(ctx, workspaceId, reqEditors...)
+func (c *ClientWithResponses) GetWorkspaceRulesWithResponse(ctx context.Context, workspaceId openapi_types.UUID, params *GetWorkspaceRulesParams, reqEditors ...RequestEditorFn) (*GetWorkspaceRulesResponse, error) {
+	rsp, err := c.GetWorkspaceRules(ctx, workspaceId, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -5064,6 +5230,16 @@ func ParseCreateConnectionResponse(rsp *http.Response) (*CreateConnectionRespons
 		}
 		response.JSON400 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
 		var dest struct {
 			Error   *interface{} `json:"error,omitempty"`
@@ -5112,6 +5288,16 @@ func ParseDeleteConnectionResponse(rsp *http.Response) (*DeleteConnectionRespons
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest struct {
@@ -5225,6 +5411,16 @@ func ParseUpdateConnectionResponse(rsp *http.Response) (*UpdateConnectionRespons
 		}
 		response.JSON400 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest struct {
 			Error   *interface{} `json:"error,omitempty"`
@@ -5270,6 +5466,16 @@ func ParseGetConnectionActionsResponse(rsp *http.Response) (*GetConnectionAction
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest struct {
@@ -5346,6 +5552,16 @@ func ParseGetConnectionFieldsResponse(rsp *http.Response) (*GetConnectionFieldsR
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest struct {
 			Error   *interface{} `json:"error,omitempty"`
@@ -5419,6 +5635,16 @@ func ParseGetConnectionDefaultMappingsResponse(rsp *http.Response) (*GetConnecti
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest struct {
 			Error   *interface{} `json:"error,omitempty"`
@@ -5491,6 +5717,16 @@ func ParseUpdateConnectionDefaultMappingsResponse(rsp *http.Response) (*UpdateCo
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest struct {
@@ -6213,6 +6449,16 @@ func ParseCreateRuleResponse(rsp *http.Response) (*CreateRuleResponse, error) {
 		}
 		response.JSON400 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest struct {
 			Error   *interface{} `json:"error,omitempty"`
@@ -6381,14 +6627,17 @@ func ParseListSessionsResponse(rsp *http.Response) (*ListSessionsResponse, error
 			Limit      int     `json:"limit"`
 			NextCursor *string `json:"next_cursor"`
 			Records    []struct {
-				CreatedAt      string  `json:"created_at"`
-				ExpiresAt      string  `json:"expires_at"`
-				ExternalUserId *string `json:"external_user_id,omitempty"`
-				IsExpired      bool    `json:"is_expired"`
-				Role           string  `json:"role"`
-				SessionId      string  `json:"session_id"`
-				Status         string  `json:"status"`
-				WorkspaceId    string  `json:"workspace_id"`
+				CreatedAt      string                 `json:"created_at"`
+				ExpiresAt      string                 `json:"expires_at"`
+				ExternalUserId *string                `json:"external_user_id,omitempty"`
+				IsExpired      bool                   `json:"is_expired"`
+				Resource       *string                `json:"resource,omitempty"`
+				ResourceId     *string                `json:"resource_id,omitempty"`
+				Role           N200RecordsRole        `json:"role"`
+				SessionId      string                 `json:"session_id"`
+				SessionType    N200RecordsSessionType `json:"session_type"`
+				Status         string                 `json:"status"`
+				WorkspaceId    string                 `json:"workspace_id"`
 			} `json:"records"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -6457,20 +6706,33 @@ func ParseCreateSessionResponse(rsp *http.Response) (*CreateSessionResponse, err
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			AccessToken     string    `json:"access_token"`
-			ExpiresAt       time.Time `json:"expires_at"`
-			ExpiresIn       float32   `json:"expires_in"`
-			LaunchExpiresAt time.Time `json:"launch_expires_at"`
-			LaunchToken     string    `json:"launch_token"`
-			LaunchUrl       string    `json:"launch_url"`
-			Role            N200Role  `json:"role"`
-			SessionId       string    `json:"session_id"`
-			WorkspaceId     string    `json:"workspace_id"`
+			AccessToken     string          `json:"access_token"`
+			ExpiresAt       time.Time       `json:"expires_at"`
+			ExpiresIn       float32         `json:"expires_in"`
+			LaunchExpiresAt time.Time       `json:"launch_expires_at"`
+			LaunchToken     string          `json:"launch_token"`
+			LaunchUrl       string          `json:"launch_url"`
+			Resource        *string         `json:"resource,omitempty"`
+			ResourceId      *string         `json:"resource_id,omitempty"`
+			Role            N200Role        `json:"role"`
+			SessionId       string          `json:"session_id"`
+			SessionType     N200SessionType `json:"session_type"`
+			WorkspaceId     string          `json:"workspace_id"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest struct {
@@ -6601,12 +6863,15 @@ func ParseRefreshSessionResponse(rsp *http.Response) (*RefreshSessionResponse, e
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest struct {
-			AccessToken string    `json:"access_token"`
-			ExpiresAt   time.Time `json:"expires_at"`
-			ExpiresIn   float32   `json:"expires_in"`
-			Role        N200Role  `json:"role"`
-			SessionId   string    `json:"session_id"`
-			WorkspaceId string    `json:"workspace_id"`
+			AccessToken string          `json:"access_token"`
+			ExpiresAt   time.Time       `json:"expires_at"`
+			ExpiresIn   float32         `json:"expires_in"`
+			Resource    *string         `json:"resource,omitempty"`
+			ResourceId  *string         `json:"resource_id,omitempty"`
+			Role        N200Role        `json:"role"`
+			SessionId   string          `json:"session_id"`
+			SessionType N200SessionType `json:"session_type"`
+			WorkspaceId string          `json:"workspace_id"`
 		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err

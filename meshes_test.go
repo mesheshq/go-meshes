@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,40 @@ func jsonResponse(t *testing.T, w http.ResponseWriter, status int, body interfac
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		t.Fatalf("failed to encode response: %v", err)
 	}
+}
+
+func newJSONHTTPResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header: http.Header{
+			"Content-Type": []string{"application/json"},
+		},
+		Body: io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func responseMessageField(t *testing.T, resp interface{}, field string) string {
+	t.Helper()
+
+	value := reflect.ValueOf(resp)
+	if value.Kind() != reflect.Ptr || value.IsNil() {
+		t.Fatalf("expected pointer response, got %T", resp)
+	}
+
+	fieldValue := value.Elem().FieldByName(field)
+	if !fieldValue.IsValid() {
+		t.Fatalf("expected field %s on %T", field, resp)
+	}
+	if fieldValue.IsNil() {
+		t.Fatalf("expected field %s to be set", field)
+	}
+
+	message := fieldValue.Elem().FieldByName("Message")
+	if !message.IsValid() {
+		t.Fatalf("expected Message field on %s", field)
+	}
+
+	return message.String()
 }
 
 func newTestManagementClient(t *testing.T, server *httptest.Server) *ClientWithResponses {
@@ -479,6 +514,8 @@ func TestListSessionsWithQueryParams(t *testing.T) {
 	limit := 10
 	cursor := "cursor_123"
 	status := Active
+	resource := "contacts"
+	resourceID := "contact_123"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -499,6 +536,12 @@ func TestListSessionsWithQueryParams(t *testing.T) {
 		if got := r.URL.Query().Get("status"); got != string(status) {
 			t.Errorf("expected status %s, got %s", status, got)
 		}
+		if got := r.URL.Query().Get("resource"); got != resource {
+			t.Errorf("expected resource %s, got %s", resource, got)
+		}
+		if got := r.URL.Query().Get("resource_id"); got != resourceID {
+			t.Errorf("expected resource_id %s, got %s", resourceID, got)
+		}
 
 		jsonResponse(t, w, 200, map[string]interface{}{
 			"count":       1,
@@ -510,8 +553,11 @@ func TestListSessionsWithQueryParams(t *testing.T) {
 					"expires_at":       "2024-02-01T10:30:00Z",
 					"external_user_id": "user_ext_123",
 					"is_expired":       false,
+					"resource":         resource,
+					"resource_id":      resourceID,
 					"role":             "member",
 					"session_id":       "sess_123",
+					"session_type":     "resource",
 					"status":           "active",
 					"workspace_id":     workspaceID.String(),
 				},
@@ -526,6 +572,8 @@ func TestListSessionsWithQueryParams(t *testing.T) {
 		Cursor:      &cursor,
 		WorkspaceId: workspaceID,
 		Status:      &status,
+		Resource:    &resource,
+		ResourceId:  &resourceID,
 	})
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -543,18 +591,30 @@ func TestListSessionsWithQueryParams(t *testing.T) {
 	if record.Role != "member" {
 		t.Errorf("expected role member, got %s", record.Role)
 	}
+	if record.SessionType != "resource" {
+		t.Errorf("expected session_type resource, got %s", record.SessionType)
+	}
 	if record.ExternalUserId == nil || *record.ExternalUserId != "user_ext_123" {
 		t.Fatalf("expected external_user_id user_ext_123, got %v", record.ExternalUserId)
+	}
+	if record.Resource == nil || *record.Resource != resource {
+		t.Fatalf("expected resource %s, got %v", resource, record.Resource)
+	}
+	if record.ResourceId == nil || *record.ResourceId != resourceID {
+		t.Fatalf("expected resource_id %s, got %v", resourceID, record.ResourceId)
 	}
 }
 
 func TestCreateSession(t *testing.T) {
 	workspaceID := mustUUID("00000000-0000-0000-0000-0000000000ab")
 	externalUserID := "user_ext_456"
-	launchPath := "/dashboard"
+	launchPage := CreateSessionJSONBodyLaunchPageEvents
 	launchTTLSeconds := 300
+	resource := "contacts"
+	resourceID := "contact_456"
 	role := Member
 	scopes := []CreateSessionJSONBodyScopes{EventsPayloadRead}
+	sessionType := CreateSessionJSONBodySessionTypeResource
 	ttlSeconds := 1800
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -584,11 +644,20 @@ func TestCreateSession(t *testing.T) {
 		if req["external_user_id"] != externalUserID {
 			t.Errorf("expected external_user_id %s, got %v", externalUserID, req["external_user_id"])
 		}
-		if req["launch_path"] != launchPath {
-			t.Errorf("expected launch_path %s, got %v", launchPath, req["launch_path"])
+		if req["launch_page"] != string(launchPage) {
+			t.Errorf("expected launch_page %s, got %v", launchPage, req["launch_page"])
+		}
+		if req["resource"] != resource {
+			t.Errorf("expected resource %s, got %v", resource, req["resource"])
+		}
+		if req["resource_id"] != resourceID {
+			t.Errorf("expected resource_id %s, got %v", resourceID, req["resource_id"])
 		}
 		if req["role"] != string(role) {
 			t.Errorf("expected role %s, got %v", role, req["role"])
+		}
+		if req["session_type"] != string(sessionType) {
+			t.Errorf("expected session_type %s, got %v", sessionType, req["session_type"])
 		}
 
 		allowedOrigins, ok := req["allowed_origins"].([]interface{})
@@ -618,8 +687,11 @@ func TestCreateSession(t *testing.T) {
 			"launch_expires_at": "2024-02-01T10:10:00Z",
 			"launch_token":      "launch_123",
 			"launch_url":        "https://app.meshes.io/launch/launch_123",
+			"resource":          resource,
+			"resource_id":       resourceID,
 			"role":              "member",
 			"session_id":        "sess_456",
+			"session_type":      "resource",
 			"workspace_id":      workspaceID.String(),
 		})
 	}))
@@ -629,10 +701,13 @@ func TestCreateSession(t *testing.T) {
 	resp, err := client.CreateSessionWithResponse(context.Background(), CreateSessionJSONRequestBody{
 		AllowedOrigins:   &[]string{"https://app.example.com", "https://admin.example.com"},
 		ExternalUserId:   &externalUserID,
-		LaunchPath:       &launchPath,
+		LaunchPage:       &launchPage,
 		LaunchTtlSeconds: &launchTTLSeconds,
+		Resource:         &resource,
+		ResourceId:       &resourceID,
 		Role:             &role,
 		Scopes:           &scopes,
+		SessionType:      &sessionType,
 		TtlSeconds:       &ttlSeconds,
 		WorkspaceId:      workspaceID,
 	})
@@ -647,6 +722,15 @@ func TestCreateSession(t *testing.T) {
 	}
 	if resp.JSON200.Role != "member" {
 		t.Errorf("expected role member, got %s", resp.JSON200.Role)
+	}
+	if resp.JSON200.SessionType != "resource" {
+		t.Errorf("expected session_type resource, got %s", resp.JSON200.SessionType)
+	}
+	if resp.JSON200.Resource == nil || *resp.JSON200.Resource != resource {
+		t.Fatalf("expected resource %s, got %v", resource, resp.JSON200.Resource)
+	}
+	if resp.JSON200.ResourceId == nil || *resp.JSON200.ResourceId != resourceID {
+		t.Fatalf("expected resource_id %s, got %v", resourceID, resp.JSON200.ResourceId)
 	}
 	if resp.JSON200.WorkspaceId != workspaceID.String() {
 		t.Errorf("expected workspace ID %s, got %s", workspaceID, resp.JSON200.WorkspaceId)
@@ -682,6 +766,9 @@ func TestRevokeSession(t *testing.T) {
 }
 
 func TestRefreshSession(t *testing.T) {
+	resource := "contacts"
+	resourceID := "contact_789"
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
@@ -694,8 +781,11 @@ func TestRefreshSession(t *testing.T) {
 			"access_token": "access_refresh_123",
 			"expires_at":   "2024-02-01T11:00:00Z",
 			"expires_in":   1200,
+			"resource":     resource,
+			"resource_id":  resourceID,
 			"role":         "admin",
 			"session_id":   "sess_refresh",
+			"session_type": "resource",
 			"workspace_id": "00000000-0000-0000-0000-0000000000ac",
 		})
 	}))
@@ -717,6 +807,116 @@ func TestRefreshSession(t *testing.T) {
 	}
 	if resp.JSON200.SessionId != "sess_refresh" {
 		t.Errorf("expected session ID sess_refresh, got %s", resp.JSON200.SessionId)
+	}
+	if resp.JSON200.SessionType != "resource" {
+		t.Errorf("expected session_type resource, got %s", resp.JSON200.SessionType)
+	}
+	if resp.JSON200.Resource == nil || *resp.JSON200.Resource != resource {
+		t.Fatalf("expected resource %s, got %v", resource, resp.JSON200.Resource)
+	}
+	if resp.JSON200.ResourceId == nil || *resp.JSON200.ResourceId != resourceID {
+		t.Fatalf("expected resource_id %s, got %v", resourceID, resp.JSON200.ResourceId)
+	}
+}
+
+func TestCreateSessionBadRequest(t *testing.T) {
+	workspaceID := mustUUID("00000000-0000-0000-0000-0000000000ab")
+	badSessionType := CreateSessionJSONBodySessionType("invalid")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(t, w, http.StatusBadRequest, map[string]interface{}{
+			"message": "invalid session_type",
+		})
+	}))
+	defer server.Close()
+
+	client := newTestManagementClient(t, server)
+	resp, err := client.CreateSessionWithResponse(context.Background(), CreateSessionJSONRequestBody{
+		SessionType: &badSessionType,
+		WorkspaceId: workspaceID,
+	})
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.JSON400 == nil {
+		t.Fatal("expected JSON400 to be non-nil")
+	}
+	if resp.JSON400.Message != "invalid session_type" {
+		t.Errorf("expected invalid session_type message, got %s", resp.JSON400.Message)
+	}
+}
+
+func TestGetWorkspaceRulesWithQueryParams(t *testing.T) {
+	workspaceID := mustUUID("00000000-0000-0000-0000-0000000000ae")
+	event := "user.signup"
+	resource := "contacts"
+	resourceID := "contact_123"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/workspaces/"+workspaceID.String()+"/rules" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("event"); got != event {
+			t.Errorf("expected event %s, got %s", event, got)
+		}
+		if got := r.URL.Query().Get("resource"); got != resource {
+			t.Errorf("expected resource %s, got %s", resource, got)
+		}
+		if got := r.URL.Query().Get("resource_id"); got != resourceID {
+			t.Errorf("expected resource_id %s, got %s", resourceID, got)
+		}
+
+		jsonResponse(t, w, 200, map[string]interface{}{
+			"count":       1,
+			"limit":       20,
+			"next_cursor": nil,
+			"records": []map[string]interface{}{
+				{
+					"id":          "00000000-0000-0000-0000-000000000021",
+					"workspace":   workspaceID.String(),
+					"connection":  "00000000-0000-0000-0000-000000000010",
+					"event":       event,
+					"resource":    resource,
+					"resource_id": resourceID,
+					"type":        "integration",
+					"metadata":    map[string]interface{}{"action": "sync_contact"},
+					"active":      true,
+					"created_at":  "2024-01-01T00:00:00Z",
+					"updated_at":  "2024-01-01T00:00:00Z",
+					"created_by":  "user_123",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := newTestManagementClient(t, server)
+	resp, err := client.GetWorkspaceRulesWithResponse(context.Background(), workspaceID, &GetWorkspaceRulesParams{
+		Event:      &event,
+		Resource:   &resource,
+		ResourceId: &resourceID,
+	})
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	if resp.JSON200 == nil {
+		t.Fatal("expected JSON200 to be non-nil")
+	}
+	if resp.JSON200.Count != 1 {
+		t.Fatalf("expected count 1, got %d", resp.JSON200.Count)
+	}
+	record := resp.JSON200.Records[0]
+	if record.Metadata.Action != "sync_contact" {
+		t.Errorf("expected action sync_contact, got %s", record.Metadata.Action)
+	}
+	if record.Resource == nil || *record.Resource != resource {
+		t.Fatalf("expected resource %s, got %v", resource, record.Resource)
+	}
+	if record.ResourceId == nil || *record.ResourceId != resourceID {
+		t.Fatalf("expected resource_id %s, got %v", resourceID, record.ResourceId)
 	}
 }
 
@@ -932,8 +1132,77 @@ func TestGetDefaultMappings(t *testing.T) {
 	}
 }
 
+func TestParseForbiddenResponses(t *testing.T) {
+	tests := []struct {
+		name  string
+		parse func(*http.Response) (interface{}, error)
+	}{
+		{
+			name: "create connection",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseCreateConnectionResponse(rsp)
+			},
+		},
+		{
+			name: "delete connection",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseDeleteConnectionResponse(rsp)
+			},
+		},
+		{
+			name: "update connection",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseUpdateConnectionResponse(rsp)
+			},
+		},
+		{
+			name: "get connection actions",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseGetConnectionActionsResponse(rsp)
+			},
+		},
+		{
+			name: "get connection fields",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseGetConnectionFieldsResponse(rsp)
+			},
+		},
+		{
+			name: "get default mappings",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseGetConnectionDefaultMappingsResponse(rsp)
+			},
+		},
+		{
+			name: "update default mappings",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseUpdateConnectionDefaultMappingsResponse(rsp)
+			},
+		},
+		{
+			name: "create rule",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseCreateRuleResponse(rsp)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := tt.parse(newJSONHTTPResponse(http.StatusForbidden, `{"message":"forbidden"}`))
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+			if got := responseMessageField(t, resp, "JSON403"); got != "forbidden" {
+				t.Errorf("expected forbidden message, got %s", got)
+			}
+		})
+	}
+}
+
 // --- Helpers ---
 
 func ptrTo[T any](v T) *T {
+
 	return &v
 }
