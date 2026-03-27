@@ -3374,6 +3374,10 @@ type UpdateConnectionResponse struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
+	JSON409 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
 	JSON500 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
@@ -5430,6 +5434,16 @@ func ParseUpdateConnectionResponse(rsp *http.Response) (*UpdateConnectionRespons
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest struct {
