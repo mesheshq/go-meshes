@@ -18,6 +18,21 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestParseUpdateConnectionConflictResponse(t *testing.T) {
+	resp, err := ParseUpdateConnectionResponse(
+		newJSONHTTPResponse(http.StatusConflict, `{"message":"connection already exists"}`),
+	)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if resp.StatusCode() != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d", http.StatusConflict, resp.StatusCode())
+	}
+	if got := responseMessageField(t, resp, "JSON409"); got != "connection already exists" {
+		t.Errorf("expected conflict message, got %s", got)
+	}
+}
+
 // --- Helpers ---
 
 var testCreds = MeshesCredentials{
