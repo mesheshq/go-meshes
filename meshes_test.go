@@ -431,6 +431,103 @@ func TestGetConnections(t *testing.T) {
 	}
 }
 
+func TestCreateConnectionSupportsNewIntegrationTypes(t *testing.T) {
+	workspaceID := mustUUID("00000000-0000-0000-0000-000000000001")
+
+	tests := []struct {
+		name         string
+		requestType  CreateConnectionJSONBodyType
+		responseType ConnectionType
+		expectedType string
+	}{
+		{
+			name:         "customer io",
+			requestType:  CreateConnectionJSONBodyTypeCustomerIo,
+			responseType: ConnectionTypeCustomerIo,
+			expectedType: "customer_io",
+		},
+		{
+			name:         "discord",
+			requestType:  CreateConnectionJSONBodyTypeDiscord,
+			responseType: ConnectionTypeDiscord,
+			expectedType: "discord",
+		},
+		{
+			name:         "sendgrid",
+			requestType:  CreateConnectionJSONBodyTypeSendgrid,
+			responseType: ConnectionTypeSendgrid,
+			expectedType: "sendgrid",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Errorf("expected POST, got %s", r.Method)
+				}
+				if r.URL.Path != "/api/v1/connections" {
+					t.Errorf("expected /api/v1/connections, got %s", r.URL.Path)
+				}
+
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("failed to read request body: %v", err)
+				}
+
+				var req map[string]interface{}
+				if err := json.Unmarshal(body, &req); err != nil {
+					t.Fatalf("failed to decode request: %v", err)
+				}
+				if req["type"] != tt.expectedType {
+					t.Errorf("expected type %s, got %v", tt.expectedType, req["type"])
+				}
+
+				jsonResponse(t, w, http.StatusCreated, map[string]interface{}{
+					"connection": map[string]interface{}{
+						"active":          false,
+						"created_at":      "2024-01-01T00:00:00Z",
+						"created_by":      "user_123",
+						"id":              "00000000-0000-0000-0000-000000000010",
+						"inactive_reason": "manually_inactivated",
+						"metadata":        map[string]interface{}{"source": "test"},
+						"name":            "Test " + tt.name,
+						"type":            tt.expectedType,
+						"updated_at":      "2024-01-01T00:00:00Z",
+						"workspace":       workspaceID.String(),
+					},
+				})
+			}))
+			defer server.Close()
+
+			client := newTestManagementClient(t, server)
+			resp, err := client.CreateConnectionWithResponse(context.Background(), CreateConnectionJSONRequestBody{
+				Metadata:  map[string]interface{}{"source": "test"},
+				Name:      "Test " + tt.name,
+				Type:      tt.requestType,
+				Workspace: workspaceID,
+			})
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			if resp.JSON201 == nil {
+				t.Fatal("expected JSON201 to be non-nil")
+			}
+
+			conn := resp.JSON201.Connection
+			if conn.Type != tt.responseType {
+				t.Errorf("expected type %s, got %s", tt.responseType, conn.Type)
+			}
+			if conn.Active == nil || *conn.Active {
+				t.Fatalf("expected active=false, got %v", conn.Active)
+			}
+			if conn.InactiveReason == nil || *conn.InactiveReason != ManuallyInactivated {
+				t.Fatalf("expected inactive reason %s, got %v", ManuallyInactivated, conn.InactiveReason)
+			}
+		})
+	}
+}
+
 func TestCreateEvent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -1210,6 +1307,84 @@ func TestParseForbiddenResponses(t *testing.T) {
 			}
 			if got := responseMessageField(t, resp, "JSON403"); got != "forbidden" {
 				t.Errorf("expected forbidden message, got %s", got)
+			}
+		})
+	}
+}
+
+func TestParseConnectionAdditionalErrorResponses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		field  string
+		parse  func(*http.Response) (interface{}, error)
+	}{
+		{
+			name:   "create connection validation",
+			status: http.StatusUnprocessableEntity,
+			field:  "JSON422",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseCreateConnectionResponse(rsp)
+			},
+		},
+		{
+			name:   "update connection validation",
+			status: http.StatusUnprocessableEntity,
+			field:  "JSON422",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseUpdateConnectionResponse(rsp)
+			},
+		},
+		{
+			name:   "get connection actions bad request",
+			status: http.StatusBadRequest,
+			field:  "JSON400",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseGetConnectionActionsResponse(rsp)
+			},
+		},
+		{
+			name:   "get connection actions conflict",
+			status: http.StatusConflict,
+			field:  "JSON409",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseGetConnectionActionsResponse(rsp)
+			},
+		},
+		{
+			name:   "get connection actions validation",
+			status: http.StatusUnprocessableEntity,
+			field:  "JSON422",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseGetConnectionActionsResponse(rsp)
+			},
+		},
+		{
+			name:   "get connection fields unauthorized",
+			status: http.StatusUnauthorized,
+			field:  "JSON401",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseGetConnectionFieldsResponse(rsp)
+			},
+		},
+		{
+			name:   "get connection fields validation",
+			status: http.StatusUnprocessableEntity,
+			field:  "JSON422",
+			parse: func(rsp *http.Response) (interface{}, error) {
+				return ParseGetConnectionFieldsResponse(rsp)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := tt.parse(newJSONHTTPResponse(tt.status, `{"message":"handled"}`))
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+			if got := responseMessageField(t, resp, tt.field); got != "handled" {
+				t.Errorf("expected handled message, got %s", got)
 			}
 		})
 	}
