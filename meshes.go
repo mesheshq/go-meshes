@@ -23,16 +23,27 @@ const (
 	PublishableKeyScopes = "publishableKey.Scopes"
 )
 
+// Defines values for ConnectionInactiveReason.
+const (
+	AuthenticationInvalid        ConnectionInactiveReason = "authentication_invalid"
+	ManuallyInactivated          ConnectionInactiveReason = "manually_inactivated"
+	OauthAuthorizationRevoked    ConnectionInactiveReason = "oauth_authorization_revoked"
+	OauthReauthorizationRequired ConnectionInactiveReason = "oauth_reauthorization_required"
+)
+
 // Defines values for ConnectionType.
 const (
 	ConnectionTypeActivecampaign ConnectionType = "activecampaign"
 	ConnectionTypeAweber         ConnectionType = "aweber"
+	ConnectionTypeCustomerIo     ConnectionType = "customer_io"
+	ConnectionTypeDiscord        ConnectionType = "discord"
 	ConnectionTypeHubspot        ConnectionType = "hubspot"
 	ConnectionTypeIntercom       ConnectionType = "intercom"
 	ConnectionTypeMailchimp      ConnectionType = "mailchimp"
 	ConnectionTypeMailerlite     ConnectionType = "mailerlite"
 	ConnectionTypeResend         ConnectionType = "resend"
 	ConnectionTypeSalesforce     ConnectionType = "salesforce"
+	ConnectionTypeSendgrid       ConnectionType = "sendgrid"
 	ConnectionTypeSlack          ConnectionType = "slack"
 	ConnectionTypeWebhook        ConnectionType = "webhook"
 	ConnectionTypeZoom           ConnectionType = "zoom"
@@ -54,12 +65,15 @@ const (
 const (
 	CreateConnectionJSONBodyTypeActivecampaign CreateConnectionJSONBodyType = "activecampaign"
 	CreateConnectionJSONBodyTypeAweber         CreateConnectionJSONBodyType = "aweber"
+	CreateConnectionJSONBodyTypeCustomerIo     CreateConnectionJSONBodyType = "customer_io"
+	CreateConnectionJSONBodyTypeDiscord        CreateConnectionJSONBodyType = "discord"
 	CreateConnectionJSONBodyTypeHubspot        CreateConnectionJSONBodyType = "hubspot"
 	CreateConnectionJSONBodyTypeIntercom       CreateConnectionJSONBodyType = "intercom"
 	CreateConnectionJSONBodyTypeMailchimp      CreateConnectionJSONBodyType = "mailchimp"
 	CreateConnectionJSONBodyTypeMailerlite     CreateConnectionJSONBodyType = "mailerlite"
 	CreateConnectionJSONBodyTypeResend         CreateConnectionJSONBodyType = "resend"
 	CreateConnectionJSONBodyTypeSalesforce     CreateConnectionJSONBodyType = "salesforce"
+	CreateConnectionJSONBodyTypeSendgrid       CreateConnectionJSONBodyType = "sendgrid"
 	CreateConnectionJSONBodyTypeSlack          CreateConnectionJSONBodyType = "slack"
 	CreateConnectionJSONBodyTypeWebhook        CreateConnectionJSONBodyType = "webhook"
 	CreateConnectionJSONBodyTypeZoom           CreateConnectionJSONBodyType = "zoom"
@@ -121,17 +135,22 @@ type ActionDataItem map[string]interface{}
 
 // Connection defines model for Connection.
 type Connection struct {
-	ActionData *map[string]interface{} `json:"action_data,omitempty"`
-	CreatedAt  time.Time               `json:"created_at"`
-	CreatedBy  string                  `json:"created_by"`
-	Hidden     *bool                   `json:"hidden,omitempty"`
-	Id         openapi_types.UUID      `json:"id"`
-	Metadata   map[string]interface{}  `json:"metadata"`
-	Name       string                  `json:"name"`
-	Type       ConnectionType          `json:"type"`
-	UpdatedAt  time.Time               `json:"updated_at"`
-	Workspace  openapi_types.UUID      `json:"workspace"`
+	ActionData     *map[string]interface{}   `json:"action_data,omitempty"`
+	Active         *bool                     `json:"active,omitempty"`
+	CreatedAt      time.Time                 `json:"created_at"`
+	CreatedBy      string                    `json:"created_by"`
+	Hidden         *bool                     `json:"hidden,omitempty"`
+	Id             openapi_types.UUID        `json:"id"`
+	InactiveReason *ConnectionInactiveReason `json:"inactive_reason,omitempty"`
+	Metadata       map[string]interface{}    `json:"metadata"`
+	Name           string                    `json:"name"`
+	Type           ConnectionType            `json:"type"`
+	UpdatedAt      time.Time                 `json:"updated_at"`
+	Workspace      openapi_types.UUID        `json:"workspace"`
 }
+
+// ConnectionInactiveReason defines model for Connection.InactiveReason.
+type ConnectionInactiveReason string
 
 // ConnectionType defines model for Connection.Type.
 type ConnectionType string
@@ -3265,6 +3284,10 @@ type CreateConnectionResponse struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
+	JSON422 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
 	JSON500 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
@@ -3378,6 +3401,10 @@ type UpdateConnectionResponse struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
+	JSON422 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
 	JSON500 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
@@ -3404,11 +3431,23 @@ type GetConnectionActionsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *interface{}
-	JSON403      *struct {
+	JSON400      *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
+	JSON403 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
 	JSON404 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
+	JSON409 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
+	JSON422 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
@@ -3467,6 +3506,10 @@ type GetConnectionFieldsResponse struct {
 		UpdatedAt       time.Time           `json:"updated_at"`
 		WorkspaceId     openapi_types.UUID  `json:"workspace_id"`
 	}
+	JSON401 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
 	JSON403 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
@@ -3476,6 +3519,10 @@ type GetConnectionFieldsResponse struct {
 		Message string       `json:"message"`
 	}
 	JSON409 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
+	JSON422 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
@@ -5254,6 +5301,16 @@ func ParseCreateConnectionResponse(rsp *http.Response) (*CreateConnectionRespons
 		}
 		response.JSON409 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest struct {
 			Error   *interface{} `json:"error,omitempty"`
@@ -5445,6 +5502,16 @@ func ParseUpdateConnectionResponse(rsp *http.Response) (*UpdateConnectionRespons
 		}
 		response.JSON409 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest struct {
 			Error   *interface{} `json:"error,omitempty"`
@@ -5481,6 +5548,16 @@ func ParseGetConnectionActionsResponse(rsp *http.Response) (*GetConnectionAction
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
 		var dest struct {
 			Error   *interface{} `json:"error,omitempty"`
@@ -5500,6 +5577,26 @@ func ParseGetConnectionActionsResponse(rsp *http.Response) (*GetConnectionAction
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest struct {
@@ -5566,6 +5663,16 @@ func ParseGetConnectionFieldsResponse(rsp *http.Response) (*GetConnectionFieldsR
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
 		var dest struct {
 			Error   *interface{} `json:"error,omitempty"`
@@ -5595,6 +5702,16 @@ func ParseGetConnectionFieldsResponse(rsp *http.Response) (*GetConnectionFieldsR
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest struct {
