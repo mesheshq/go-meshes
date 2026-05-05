@@ -33,6 +33,53 @@ func TestParseUpdateConnectionConflictResponse(t *testing.T) {
 	}
 }
 
+func TestParseConnectionRateLimitResponses(t *testing.T) {
+	tests := []struct {
+		name  string
+		parse func(*http.Response) (interface{}, error)
+	}{
+		{
+			name: "create connection",
+			parse: func(resp *http.Response) (interface{}, error) {
+				return ParseCreateConnectionResponse(resp)
+			},
+		},
+		{
+			name: "update connection",
+			parse: func(resp *http.Response) (interface{}, error) {
+				return ParseUpdateConnectionResponse(resp)
+			},
+		},
+		{
+			name: "get connection actions",
+			parse: func(resp *http.Response) (interface{}, error) {
+				return ParseGetConnectionActionsResponse(resp)
+			},
+		},
+		{
+			name: "get connection fields",
+			parse: func(resp *http.Response) (interface{}, error) {
+				return ParseGetConnectionFieldsResponse(resp)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := tt.parse(newJSONHTTPResponse(http.StatusTooManyRequests, `{"message":"rate limit exceeded"}`))
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+			if got := responseStatusCode(t, resp); got != http.StatusTooManyRequests {
+				t.Fatalf("expected status %d, got %d", http.StatusTooManyRequests, got)
+			}
+			if got := responseMessageField(t, resp, "JSON429"); got != "rate limit exceeded" {
+				t.Errorf("expected rate limit message, got %s", got)
+			}
+		})
+	}
+}
+
 // --- Helpers ---
 
 var testCreds = MeshesCredentials{
@@ -90,6 +137,19 @@ func responseMessageField(t *testing.T, resp interface{}, field string) string {
 	}
 
 	return message.String()
+}
+
+func responseStatusCode(t *testing.T, resp interface{}) int {
+	t.Helper()
+
+	statusCoder, ok := resp.(interface {
+		StatusCode() int
+	})
+	if !ok {
+		t.Fatalf("expected response with StatusCode method, got %T", resp)
+	}
+
+	return statusCoder.StatusCode()
 }
 
 func newTestManagementClient(t *testing.T, server *httptest.Server) *ClientWithResponses {
@@ -451,6 +511,12 @@ func TestCreateConnectionSupportsNewIntegrationTypes(t *testing.T) {
 			requestType:  CreateConnectionJSONBodyTypeDiscord,
 			responseType: ConnectionTypeDiscord,
 			expectedType: "discord",
+		},
+		{
+			name:         "pipedrive",
+			requestType:  CreateConnectionJSONBodyTypePipedrive,
+			responseType: ConnectionTypePipedrive,
+			expectedType: "pipedrive",
 		},
 		{
 			name:         "sendgrid",

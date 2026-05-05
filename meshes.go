@@ -41,6 +41,7 @@ const (
 	ConnectionTypeIntercom       ConnectionType = "intercom"
 	ConnectionTypeMailchimp      ConnectionType = "mailchimp"
 	ConnectionTypeMailerlite     ConnectionType = "mailerlite"
+	ConnectionTypePipedrive      ConnectionType = "pipedrive"
 	ConnectionTypeResend         ConnectionType = "resend"
 	ConnectionTypeSalesforce     ConnectionType = "salesforce"
 	ConnectionTypeSendgrid       ConnectionType = "sendgrid"
@@ -71,6 +72,7 @@ const (
 	CreateConnectionJSONBodyTypeIntercom       CreateConnectionJSONBodyType = "intercom"
 	CreateConnectionJSONBodyTypeMailchimp      CreateConnectionJSONBodyType = "mailchimp"
 	CreateConnectionJSONBodyTypeMailerlite     CreateConnectionJSONBodyType = "mailerlite"
+	CreateConnectionJSONBodyTypePipedrive      CreateConnectionJSONBodyType = "pipedrive"
 	CreateConnectionJSONBodyTypeResend         CreateConnectionJSONBodyType = "resend"
 	CreateConnectionJSONBodyTypeSalesforce     CreateConnectionJSONBodyType = "salesforce"
 	CreateConnectionJSONBodyTypeSendgrid       CreateConnectionJSONBodyType = "sendgrid"
@@ -3288,6 +3290,10 @@ type CreateConnectionResponse struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
+	JSON429 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
 	JSON500 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
@@ -3405,6 +3411,10 @@ type UpdateConnectionResponse struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
+	JSON429 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
 	JSON500 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
@@ -3448,6 +3458,10 @@ type GetConnectionActionsResponse struct {
 		Message string       `json:"message"`
 	}
 	JSON422 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
+	JSON429 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
@@ -3523,6 +3537,10 @@ type GetConnectionFieldsResponse struct {
 		Message string       `json:"message"`
 	}
 	JSON422 *struct {
+		Error   *interface{} `json:"error,omitempty"`
+		Message string       `json:"message"`
+	}
+	JSON429 *struct {
 		Error   *interface{} `json:"error,omitempty"`
 		Message string       `json:"message"`
 	}
@@ -5311,6 +5329,16 @@ func ParseCreateConnectionResponse(rsp *http.Response) (*CreateConnectionRespons
 		}
 		response.JSON422 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest struct {
 			Error   *interface{} `json:"error,omitempty"`
@@ -5512,6 +5540,16 @@ func ParseUpdateConnectionResponse(rsp *http.Response) (*UpdateConnectionRespons
 		}
 		response.JSON422 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest struct {
 			Error   *interface{} `json:"error,omitempty"`
@@ -5597,6 +5635,16 @@ func ParseGetConnectionActionsResponse(rsp *http.Response) (*GetConnectionAction
 			return nil, err
 		}
 		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest struct {
@@ -5712,6 +5760,16 @@ func ParseGetConnectionFieldsResponse(rsp *http.Response) (*GetConnectionFieldsR
 			return nil, err
 		}
 		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest struct {
+			Error   *interface{} `json:"error,omitempty"`
+			Message string       `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest struct {
